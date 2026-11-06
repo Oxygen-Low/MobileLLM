@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan for on-device LLM runner supporting GGUF & SafeTensors models, DeepSmolLM3 & SmolLM3 profiles, live DuckDuckGo web search, MCP tools, real-time tokens/second telemetry, collapsible reasoning traces, and lifecycle-managed loading/unloading in Developer Dark Mode.",
+  "updatedAt": "2026-11-06T13:56:46.139947078Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
