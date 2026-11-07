@@ -18,18 +18,15 @@ data class ModelProfile(
     val memoryMb: Int,
     val description: String = "",
     val supportsReasoning: Boolean,
-    val huggingFaceRepo: String? = null,
-    val huggingFaceFile: String? = null,
-    val downloadSizeMb: Int = 1800,
+    val modelScopeRepo: String? = null,
+    val modelScopeFile: String? = null,
+    val modelScopeUrl: String? = null,
+    val downloadSizeMb: Int = 1850,
     val downloadState: ModelDownloadState = ModelDownloadState.NOT_DOWNLOADED,
-    val downloadProgress: Float = 0f,
-    val isCustom: Boolean = false,
-    val customFileName: String? = null,
-    val customFileSize: Long = 0L,
-    val customMetadata: Map<String, String> = emptyMap()
+    val downloadProgress: Float = 0f
 ) {
     val isReadyToLoad: Boolean
-        get() = downloadState == ModelDownloadState.DOWNLOADED || isCustom
+        get() = downloadState == ModelDownloadState.DOWNLOADED
 
     companion object {
         val DEEP_SMOLLM3 = ModelProfile(
@@ -42,31 +39,15 @@ data class ModelProfile(
             contextLength = 8192,
             memoryMb = 1850,
             downloadSizeMb = 1850,
-            huggingFaceRepo = "HuggingFaceTB/SmolLM3-3B-DeepReasoning-GGUF",
-            huggingFaceFile = "deepsmollm3-3b-q4_k_m.gguf",
+            modelScopeRepo = "OxygenLow/DeepSmolLM3-3B",
+            modelScopeFile = "DeepSmolLM3-3B-Q4_K_M.gguf",
+            modelScopeUrl = "https://modelscope.ai/models/OxygenLow/DeepSmolLM3-3B",
             description = "",
             supportsReasoning = true,
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )
 
-        val SMOLLM3 = ModelProfile(
-            id = "smollm3",
-            name = "SmolLM3 Base (3B Instruct)",
-            shortName = "SmolLM3",
-            format = ModelFormat.GGUF,
-            quantization = "Q4_K_M",
-            parameters = "3B",
-            contextLength = 4096,
-            memoryMb = 1750,
-            downloadSizeMb = 1790,
-            huggingFaceRepo = "HuggingFaceTB/SmolLM3-3B-Instruct-GGUF",
-            huggingFaceFile = "smollm3-3b-instruct-q4_k_m.gguf",
-            description = "",
-            supportsReasoning = false,
-            downloadState = ModelDownloadState.NOT_DOWNLOADED
-        )
-
-        val DEFAULT_MODELS = listOf(DEEP_SMOLLM3, SMOLLM3)
+        val DEFAULT_MODELS = listOf(DEEP_SMOLLM3)
     }
 }
 
@@ -80,8 +61,8 @@ data class AudioModelProfile(
     val name: String,
     val type: AudioModelType,
     val sizeMb: Int,
-    val huggingFaceRepo: String,
-    val huggingFaceFile: String,
+    val repo: String,
+    val file: String,
     val description: String = "",
     val downloadState: ModelDownloadState = ModelDownloadState.NOT_DOWNLOADED,
     val downloadProgress: Float = 0f
@@ -92,8 +73,8 @@ data class AudioModelProfile(
             name = "Whisper-Tiny Mobile STT",
             type = AudioModelType.STT,
             sizeMb = 39,
-            huggingFaceRepo = "ggerganov/whisper.cpp",
-            huggingFaceFile = "ggml-tiny.bin",
+            repo = "modelscope/whisper.cpp",
+            file = "ggml-tiny.bin",
             description = ""
         )
 
@@ -102,8 +83,8 @@ data class AudioModelProfile(
             name = "Piper Fast Neural TTS",
             type = AudioModelType.TTS,
             sizeMb = 28,
-            huggingFaceRepo = "rhasspy/piper-voices",
-            huggingFaceFile = "en_US-lessac-medium.onnx",
+            repo = "modelscope/piper-voices",
+            file = "en_US-lessac-medium.onnx",
             description = ""
         )
     }

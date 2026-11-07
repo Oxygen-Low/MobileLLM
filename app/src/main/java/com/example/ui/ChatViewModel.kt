@@ -110,14 +110,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun downloadHuggingFaceModel(model: ModelProfile) {
-        if (model.huggingFaceRepo == null || model.huggingFaceFile == null) return
+    fun downloadModel(model: ModelProfile) {
+        if (model.modelScopeRepo == null || model.modelScopeFile == null) return
 
         viewModelScope.launch {
             downloadManager.startDownload(
                 modelId = model.id,
-                repo = model.huggingFaceRepo,
-                filename = model.huggingFaceFile,
+                repo = model.modelScopeRepo,
+                filename = model.modelScopeFile,
                 totalMb = model.downloadSizeMb
             ) {
                 // Update model state to DOWNLOADED
@@ -170,13 +170,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             modelEngineManager.unloadModel()
         }
-    }
-
-    fun addCustomModel(model: ModelProfile) {
-        if (!availableModels.value.any { it.id == model.id }) {
-            availableModels.value = availableModels.value + model
-        }
-        loadModel(model)
     }
 
     fun toggleSearch(enabled: Boolean) {

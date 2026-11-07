@@ -112,8 +112,8 @@ class SpeechEngineManager(
             ttsModel.value = ttsModel.value.copy(downloadState = ModelDownloadState.DOWNLOADING)
             downloadManager.startDownload(
                 modelId = ttsModel.value.id,
-                repo = ttsModel.value.huggingFaceRepo,
-                filename = ttsModel.value.huggingFaceFile,
+                repo = ttsModel.value.repo,
+                filename = ttsModel.value.file,
                 totalMb = ttsModel.value.sizeMb
             ) {
                 ttsModel.value = ttsModel.value.copy(
@@ -130,8 +130,8 @@ class SpeechEngineManager(
             sttModel.value = sttModel.value.copy(downloadState = ModelDownloadState.DOWNLOADING)
             downloadManager.startDownload(
                 modelId = sttModel.value.id,
-                repo = sttModel.value.huggingFaceRepo,
-                filename = sttModel.value.huggingFaceFile,
+                repo = sttModel.value.repo,
+                filename = sttModel.value.file,
                 totalMb = sttModel.value.sizeMb
             ) {
                 sttModel.value = sttModel.value.copy(

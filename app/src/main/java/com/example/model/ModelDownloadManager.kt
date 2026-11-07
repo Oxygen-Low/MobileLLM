@@ -80,15 +80,15 @@ class ModelDownloadManager(
         )
 
         try {
-            val url = "https://huggingface.co/$repo/resolve/main/$filename"
-            // We simulate a responsive, high-speed chunked Hugging Face download
+            val url = "https://modelscope.ai/models/$repo/resolve/master/$filename"
+            // We simulate a responsive, high-speed chunked ModelScope download
             // while writing real descriptor bytes to targetFile so it is persistently marked as downloaded.
             val totalBytes = totalMb * 1024L * 1024L
             val steps = 30
             val delayPerStep = 60L // ~1.8 seconds total for demo responsiveness
 
             FileOutputStream(targetFile).use { fos ->
-                fos.write("HUGGINGFACE_MODEL_${repo}_$filename".toByteArray())
+                fos.write("MODELSCOPE_MODEL_${repo}_$filename".toByteArray())
                 for (step in 1..steps) {
                     delay(delayPerStep)
                     val progress = step.toFloat() / steps
@@ -141,7 +141,7 @@ class ModelDownloadManager(
                     totalMb = totalMb.toFloat(),
                     speedMbps = 0f,
                     state = ModelDownloadState.ERROR,
-                    error = e.message ?: "Failed to download from Hugging Face"
+                    error = e.message ?: "Failed to download from ModelScope"
                 )
             )
         }
