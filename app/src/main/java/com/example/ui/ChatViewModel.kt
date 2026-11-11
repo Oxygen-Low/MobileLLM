@@ -153,6 +153,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun reinstallModel(model: ModelProfile) {
+        if (model.modelScopeRepo == null || model.modelScopeFile == null) return
+
+        viewModelScope.launch {
+            // Unload the weights first so the file is not in use while it is replaced.
+            if (selectedModel.value.id == model.id) {
+                modelEngineManager.unloadModel()
+            }
+            downloadManager.deleteModel(model.id)
+            val updated = availableModels.value.map {
+                if (it.id == model.id) {
+                    it.copy(downloadState = ModelDownloadState.NOT_DOWNLOADED, downloadProgress = 0f)
+                } else {
+                    it
+                }
+            }
+            availableModels.value = updated
+            selectedModel.value = updated.first { it.id == selectedModel.value.id }
+            downloadModel(model)
+        }
+    }
+
     fun loadModel(model: ModelProfile) {
         selectedModel.value = model
         viewModelScope.launch {

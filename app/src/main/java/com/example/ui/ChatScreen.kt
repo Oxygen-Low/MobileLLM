@@ -346,6 +346,7 @@ fun ChatScreen(
         downloadStates = downloadStates,
         onSelectAndLoadModel = { viewModel.loadModel(it) },
         onDownloadModel = { viewModel.downloadModel(it) },
+        onReinstallModel = { viewModel.reinstallModel(it) },
         onDeleteModel = { viewModel.deleteDownloadedModel(it) }
     )
 

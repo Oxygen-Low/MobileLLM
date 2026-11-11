@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -70,6 +71,7 @@ fun ModelsHubSheet(
     downloadStates: Map<String, DownloadProgressInfo>,
     onSelectAndLoadModel: (ModelProfile) -> Unit,
     onDownloadModel: (ModelProfile) -> Unit,
+    onReinstallModel: (ModelProfile) -> Unit,
     onDeleteModel: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -179,6 +181,7 @@ fun ModelsHubSheet(
                             onDismiss()
                         },
                         onDownload = { onDownloadModel(model) },
+                        onReinstall = { onReinstallModel(model) },
                         onDelete = { onDeleteModel(model.id) }
                     )
                 }
@@ -196,6 +199,7 @@ private fun ModelCard(
     downloadInfo: DownloadProgressInfo?,
     onSelectAndLoad: () -> Unit,
     onDownload: () -> Unit,
+    onReinstall: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -258,18 +262,6 @@ private fun ModelCard(
                             color = TextSecondary
                         )
                     )
-                }
-
-                // Delete button if downloaded and not active
-                if (isDownloaded && !isActive) {
-                    IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Delete",
-                            tint = TextMuted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
                 }
             }
 
@@ -344,21 +336,66 @@ private fun ModelCard(
                 horizontalArrangement = Arrangement.End
             ) {
                 if (isDownloaded) {
-                    Button(
-                        onClick = onSelectAndLoad,
-                        enabled = !isActive,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isActive) BorderSubtle else TelemetryCyan,
-                            disabledContainerColor = BorderSubtle
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        if (isActive) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Loaded in Memory", color = TextSecondary, fontSize = 12.sp)
-                        } else {
-                            Text("Load into Memory", color = SurfaceDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = onSelectAndLoad,
+                            enabled = !isActive,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isActive) BorderSubtle else TelemetryCyan,
+                                disabledContainerColor = BorderSubtle
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isActive) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Loaded in Memory", color = TextSecondary, fontSize = 12.sp)
+                            } else {
+                                Text("Load into Memory", color = SurfaceDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                        ) {
+                            OutlinedButton(
+                                onClick = onReinstall,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("reinstall_${model.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = TelemetryCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Reinstall", color = TelemetryCyan, fontSize = 12.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = onDelete,
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("delete_${model.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = ErrorRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Delete", color = ErrorRed, fontSize = 12.sp)
+                            }
                         }
                     }
                 } else if (isDownloading) {
