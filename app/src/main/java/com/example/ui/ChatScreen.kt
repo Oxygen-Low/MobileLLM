@@ -1,8 +1,8 @@
 package com.example.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,15 +22,16 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -47,20 +48,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ChatMessageEntity
+import com.example.model.ModelDownloadState
 import com.example.ui.components.ChatInputBar
 import com.example.ui.components.ChatMessageItem
-import com.example.ui.components.CustomModelDialog
 import com.example.ui.components.ModelsHubSheet
 import com.example.ui.components.SessionDrawerSheet
 import com.example.ui.components.TopTelemetryBar
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
-import com.example.ui.theme.ReasoningAmber
+import com.example.ui.theme.CardHighlight
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TelemetryCyan
@@ -86,13 +86,6 @@ fun ChatScreen(
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val searchEnabled by viewModel.searchEnabled.collectAsStateWithLifecycle()
 
-    val isTtsEnabled by viewModel.isTtsEnabled.collectAsStateWithLifecycle()
-    val isSttEnabled by viewModel.isSttEnabled.collectAsStateWithLifecycle()
-    val isListening by viewModel.isListening.collectAsStateWithLifecycle()
-    val recognizedVoiceText by viewModel.recognizedVoiceText.collectAsStateWithLifecycle()
-    val sttModel by viewModel.sttModel.collectAsStateWithLifecycle()
-    val ttsModel by viewModel.ttsModel.collectAsStateWithLifecycle()
-
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
@@ -101,9 +94,13 @@ fun ChatScreen(
 
     var isHistoryOpen by remember { mutableStateOf(false) }
     var isModelsHubOpen by remember { mutableStateOf(false) }
-    var isCustomModelDialogOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+
+    val downloadInfo = downloadStates[currentModel.id]
+    val isCurrentDownloaded = currentModel.downloadState == ModelDownloadState.DOWNLOADED ||
+            downloadInfo?.state == ModelDownloadState.DOWNLOADED
+    val isCurrentDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
 
     // Auto-scroll to bottom on new messages
     LaunchedEffect(messages.size, streamingContent.length, streamingReasoning.length) {
@@ -130,25 +127,19 @@ fun ChatScreen(
                 memoryMb = memoryMb,
                 currentTps = currentTps,
                 currentDate = viewModel.currentDate,
-                isTtsEnabled = isTtsEnabled,
                 onOpenModelsHub = { isModelsHubOpen = true },
                 onToggleHistory = { isHistoryOpen = true },
-                onNewChat = { viewModel.createNewSession() },
-                onToggleTts = { viewModel.toggleTts(!isTtsEnabled) }
+                onNewChat = { viewModel.createNewSession() }
             )
         },
         bottomBar = {
             ChatInputBar(
                 isGenerating = isGenerating,
                 searchEnabled = searchEnabled,
-                isListening = isListening,
-                recognizedVoiceText = recognizedVoiceText,
+                modelName = currentModel.shortName,
                 onToggleSearch = { viewModel.toggleSearch(it) },
                 onSendMessage = { viewModel.sendMessage(it) },
-                onStopGenerating = { viewModel.stopGeneration() },
-                onStartListening = { viewModel.startListening() },
-                onStopListening = { viewModel.stopListening() },
-                onOpenVoiceSettings = { isModelsHubOpen = true }
+                onStopGenerating = { viewModel.stopGeneration() }
             )
         }
     ) { paddingValues ->
@@ -157,50 +148,169 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(messages, key = { it.id }) { message ->
-                    ChatMessageItem(
-                        message = message,
-                        modelName = currentModel.shortName,
-                        onSpeak = { text -> viewModel.speak(text) }
-                    )
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Persistent Model Download Banner if current model is not downloaded or downloading
+                if (!isCurrentDownloaded) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, TelemetryCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        color = SurfaceElevated
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(TelemetryCyan.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Memory,
+                                            contentDescription = null,
+                                            tint = TelemetryCyan,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "${currentModel.name} (${currentModel.parameters})",
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                        )
+                                        Text(
+                                            text = if (isCurrentDownloading) "Downloading model weights into storage…"
+                                            else "GGUF • ${currentModel.quantization} • ${currentModel.downloadSizeMb} MB",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                color = TextSecondary
+                                            )
+                                        )
+                                    }
+                                }
+
+                                if (!isCurrentDownloading) {
+                                    Button(
+                                        onClick = { viewModel.downloadModel(currentModel) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = TelemetryCyan),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.testTag("download_banner_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CloudDownload,
+                                            contentDescription = null,
+                                            tint = SurfaceDark,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Download",
+                                            color = SurfaceDark,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Live Download Progress Bar
+                            if (isCurrentDownloading && downloadInfo != null) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                LinearProgressIndicator(
+                                    progress = { downloadInfo.progress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = TelemetryCyan,
+                                    trackColor = BorderSubtle
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "${(downloadInfo.progress * 100).toInt()}% • ${downloadInfo.downloadedMb.toInt()} / ${downloadInfo.totalMb.toInt()} MB",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            color = TelemetryCyan,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                    Text(
+                                        text = "${downloadInfo.speedMbps} MB/s",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            color = TerminalGreen,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
-                // Render active streaming message item
-                if (isGenerating) {
-                    item(key = "active_stream") {
-                        val activeMsg = ChatMessageEntity(
-                            id = "streaming_active",
-                            sessionId = currentSessionId ?: "",
-                            role = "assistant",
-                            content = if (streamingContent.isNotEmpty()) streamingContent else if (streamingReasoning.isNotEmpty()) "" else "Thinking…",
-                            reasoningContent = streamingReasoning.ifBlank { null },
-                            tokensCount = (streamingReasoning.length + streamingContent.length) / 4,
-                            tokensPerSecond = currentTps,
-                            isToolExecution = activeToolName != null,
-                            toolName = activeToolName,
-                            toolQuery = activeToolQuery,
-                            toolSourceUrl = activeToolSourceUrl
-                        )
+                // Chat Messages List
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(messages, key = { it.id }) { message ->
                         ChatMessageItem(
-                            message = activeMsg,
-                            modelName = currentModel.shortName,
-                            isStreaming = true,
-                            onSpeak = { text -> viewModel.speak(text) }
+                            message = message,
+                            modelName = currentModel.shortName
                         )
+                    }
+
+                    // Render active streaming message item
+                    if (isGenerating) {
+                        item(key = "active_stream") {
+                            val activeMsg = ChatMessageEntity(
+                                id = "streaming_active",
+                                sessionId = currentSessionId ?: "",
+                                role = "assistant",
+                                content = if (streamingContent.isNotEmpty()) streamingContent else if (streamingReasoning.isNotEmpty()) "" else "Thinking…",
+                                reasoningContent = streamingReasoning.ifBlank { null },
+                                tokensCount = (streamingReasoning.length + streamingContent.length) / 4,
+                                tokensPerSecond = currentTps,
+                                isToolExecution = activeToolName != null,
+                                toolName = activeToolName,
+                                toolQuery = activeToolQuery,
+                                toolSourceUrl = activeToolSourceUrl
+                            )
+                            ChatMessageItem(
+                                message = activeMsg,
+                                modelName = currentModel.shortName,
+                                isStreaming = true
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
-    // Models Hub Bottom Sheet (replaces old dropdown)
+    // Models Hub Bottom Sheet
     ModelsHubSheet(
         isOpen = isModelsHubOpen,
         onDismiss = { isModelsHubOpen = false },
@@ -208,17 +318,8 @@ fun ChatScreen(
         currentModel = currentModel,
         downloadStates = downloadStates,
         onSelectAndLoadModel = { viewModel.loadModel(it) },
-        onDownloadModel = { viewModel.downloadHuggingFaceModel(it) },
-        onDeleteModel = { viewModel.deleteDownloadedModel(it) },
-        onOpenCustomFilePicker = { isCustomModelDialogOpen = true },
-        sttModel = sttModel,
-        ttsModel = ttsModel,
-        isSttEnabled = isSttEnabled,
-        isTtsEnabled = isTtsEnabled,
-        onToggleStt = { viewModel.toggleStt(it) },
-        onToggleTts = { viewModel.toggleTts(it) },
-        onDownloadAudioModel = { viewModel.downloadAudioModel(it) },
-        onTestSpeak = { viewModel.speak(it) }
+        onDownloadModel = { viewModel.downloadModel(it) },
+        onDeleteModel = { viewModel.deleteDownloadedModel(it) }
     )
 
     // Chat History Drawer Modal
@@ -231,14 +332,5 @@ fun ChatScreen(
         onNewChat = { viewModel.createNewSession() },
         onDeleteSession = { viewModel.deleteSession(it) },
         onClearAllSessions = { viewModel.clearAllSessions() }
-    )
-
-    // Custom Model Importer Dialog
-    CustomModelDialog(
-        isOpen = isCustomModelDialogOpen,
-        onDismiss = { isCustomModelDialogOpen = false },
-        onModelConfigured = { customModel ->
-            viewModel.addCustomModel(customModel)
-        }
     )
 }

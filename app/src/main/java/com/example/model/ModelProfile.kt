@@ -21,7 +21,7 @@ data class ModelProfile(
     val modelScopeRepo: String? = null,
     val modelScopeFile: String? = null,
     val modelScopeUrl: String? = null,
-    val downloadSizeMb: Int = 1850,
+    val downloadSizeMb: Int = 5870,
     val downloadState: ModelDownloadState = ModelDownloadState.NOT_DOWNLOADED,
     val downloadProgress: Float = 0f
 ) {
@@ -31,61 +31,22 @@ data class ModelProfile(
     companion object {
         val DEEP_SMOLLM3 = ModelProfile(
             id = "deepsmollm3",
-            name = "DeepSmolLM3 (DeepSeek v4.1 Reasoning)",
+            name = "DeepSmolLM3 (BF16)",
             shortName = "DeepSmolLM3",
             format = ModelFormat.GGUF,
-            quantization = "Q4_K_M",
+            quantization = "BF16",
             parameters = "3B",
             contextLength = 8192,
-            memoryMb = 1850,
-            downloadSizeMb = 1850,
-            modelScopeRepo = "OxygenLow/DeepSmolLM3-3B",
-            modelScopeFile = "DeepSmolLM3-3B-Q4_K_M.gguf",
-            modelScopeUrl = "https://modelscope.ai/models/OxygenLow/DeepSmolLM3-3B",
-            description = "",
+            memoryMb = 5870,
+            downloadSizeMb = 5870,
+            modelScopeRepo = "Oxygen-Low/DeepSmolLM3-3B",
+            modelScopeFile = "DeepSmolLM3-3B.BF16.gguf",
+            modelScopeUrl = "https://modelscope.cn/models/Oxygen-Low/DeepSmolLM3-3B",
+            description = "3B bfloat16 (BF16) mobile GGUF model with DeepSeek v4.1-style dual-mode reasoning (<think>...</think>)",
             supportsReasoning = true,
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )
 
         val DEFAULT_MODELS = listOf(DEEP_SMOLLM3)
-    }
-}
-
-enum class AudioModelType {
-    STT, // Speech to Text
-    TTS  // Text to Speech
-}
-
-data class AudioModelProfile(
-    val id: String,
-    val name: String,
-    val type: AudioModelType,
-    val sizeMb: Int,
-    val repo: String,
-    val file: String,
-    val description: String = "",
-    val downloadState: ModelDownloadState = ModelDownloadState.NOT_DOWNLOADED,
-    val downloadProgress: Float = 0f
-) {
-    companion object {
-        val WHISPER_STT = AudioModelProfile(
-            id = "whisper_tiny_stt",
-            name = "Whisper-Tiny Mobile STT",
-            type = AudioModelType.STT,
-            sizeMb = 39,
-            repo = "modelscope/whisper.cpp",
-            file = "ggml-tiny.bin",
-            description = ""
-        )
-
-        val PIPER_TTS = AudioModelProfile(
-            id = "piper_voice_tts",
-            name = "Piper Fast Neural TTS",
-            type = AudioModelType.TTS,
-            sizeMb = 28,
-            repo = "modelscope/piper-voices",
-            file = "en_US-lessac-medium.onnx",
-            description = ""
-        )
     }
 }

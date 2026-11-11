@@ -7,7 +7,6 @@ import com.example.data.AppDatabase
 import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
 import com.example.data.ChatSessionEntity
-import com.example.model.AudioModelProfile
 import com.example.model.DownloadProgressInfo
 import com.example.model.GenerationEvent
 import com.example.model.ModelDownloadManager
@@ -15,7 +14,6 @@ import com.example.model.ModelDownloadState
 import com.example.model.ModelEngineManager
 import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
-import com.example.speech.SpeechEngineManager
 import com.example.tools.MCPToolExecutor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +33,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val mcpToolExecutor = MCPToolExecutor()
     val modelEngineManager = ModelEngineManager(mcpToolExecutor)
     val downloadManager = ModelDownloadManager(application)
-    val speechEngineManager = SpeechEngineManager(application, downloadManager, viewModelScope)
 
     val availableModels = MutableStateFlow(ModelProfile.DEFAULT_MODELS)
     val selectedModel = MutableStateFlow(ModelProfile.DEEP_SMOLLM3)
@@ -46,15 +43,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val allocatedMemoryMb: StateFlow<Int> = modelEngineManager.allocatedMemoryMb
     val currentTps: StateFlow<Double> = modelEngineManager.currentTps
     val currentDate: String = mcpToolExecutor.getCurrentFormattedDate()
-
-    // Speech states
-    val isTtsEnabled: StateFlow<Boolean> = speechEngineManager.isTtsEnabled
-    val isSttEnabled: StateFlow<Boolean> = speechEngineManager.isSttEnabled
-    val isSpeaking: StateFlow<Boolean> = speechEngineManager.isSpeaking
-    val isListening: StateFlow<Boolean> = speechEngineManager.isListening
-    val recognizedVoiceText: StateFlow<String> = speechEngineManager.recognizedText
-    val sttModel: StateFlow<AudioModelProfile> = speechEngineManager.sttModel
-    val ttsModel: StateFlow<AudioModelProfile> = speechEngineManager.ttsModel
 
     val sessions: StateFlow<List<ChatSessionEntity>> = repository.allSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -83,19 +71,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val activeToolQuery = MutableStateFlow<String?>(null)
     val activeToolSourceUrl = MutableStateFlow<String?>(null)
 
+    // Queued prompt if user submitted while downloading
+    private var pendingPrompt: String? = null
+
     private var generationJob: Job? = null
 
     init {
-        // Check if default models were already downloaded locally
+        // Check if models were already downloaded locally
         checkDownloadedModels()
     }
 
-    private fun checkDownloadedModels() {
+    fun checkDownloadedModels() {
         val updated = availableModels.value.map { model ->
             if (downloadManager.isModelDownloaded(model.id)) {
                 model.copy(downloadState = ModelDownloadState.DOWNLOADED, downloadProgress = 1.0f)
             } else {
-                model
+                model.copy(downloadState = ModelDownloadState.NOT_DOWNLOADED, downloadProgress = 0f)
             }
         }
         availableModels.value = updated
@@ -104,9 +95,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val current = updated.firstOrNull { it.id == selectedModel.value.id } ?: updated[0]
         selectedModel.value = current
         if (current.isReadyToLoad) {
-            viewModelScope.launch {
-                modelEngineManager.loadModel(current)
-            }
+            loadModel(current)
         }
     }
 
@@ -119,7 +108,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 repo = model.modelScopeRepo,
                 filename = model.modelScopeFile,
                 totalMb = model.downloadSizeMb
-            ) {
+            ) { downloadedFile ->
                 // Update model state to DOWNLOADED
                 val updated = availableModels.value.map {
                     if (it.id == model.id) it.copy(downloadState = ModelDownloadState.DOWNLOADED, downloadProgress = 1.0f)
@@ -132,6 +121,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val downloadedModel = updated.first { it.id == model.id }
                     selectedModel.value = downloadedModel
                     loadModel(downloadedModel)
+
+                    // If a prompt was queued while downloading, run it automatically
+                    val queued = pendingPrompt
+                    if (queued != null) {
+                        pendingPrompt = null
+                        sendMessage(queued)
+                    }
                 }
             }
         }
@@ -147,6 +143,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (selectedModel.value.id == modelId) {
             viewModelScope.launch {
                 modelEngineManager.unloadModel()
+                selectedModel.value = selectedModel.value.copy(downloadState = ModelDownloadState.NOT_DOWNLOADED)
             }
         }
     }
@@ -154,14 +151,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun loadModel(model: ModelProfile) {
         selectedModel.value = model
         viewModelScope.launch {
-            modelEngineManager.loadModel(model)
+            val file = downloadManager.getModelFile(model.id)
+            modelEngineManager.loadModel(model, file)
         }
     }
 
     fun onAppStart() {
         viewModelScope.launch {
             if (selectedModel.value.isReadyToLoad && modelEngineManager.loadState.value != ModelLoadState.LOADED) {
-                modelEngineManager.loadModel(selectedModel.value)
+                val file = downloadManager.getModelFile(selectedModel.value.id)
+                modelEngineManager.loadModel(selectedModel.value, file)
             }
         }
     }
@@ -174,46 +173,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleSearch(enabled: Boolean) {
         _searchEnabled.value = enabled
-    }
-
-    fun toggleTts(enabled: Boolean) {
-        speechEngineManager.toggleTts(enabled) { audioModel ->
-            // Audio model needs download
-            downloadAudioModel(audioModel)
-        }
-    }
-
-    fun toggleStt(enabled: Boolean) {
-        speechEngineManager.toggleStt(enabled) { audioModel ->
-            // Audio model needs download
-            downloadAudioModel(audioModel)
-        }
-    }
-
-    fun downloadAudioModel(audioModel: AudioModelProfile) {
-        if (audioModel.type == com.example.model.AudioModelType.STT) {
-            speechEngineManager.downloadSttModel {
-                // Done
-            }
-        } else {
-            speechEngineManager.downloadTtsModel {
-                // Done
-            }
-        }
-    }
-
-    fun speak(text: String) {
-        speechEngineManager.speak(text)
-    }
-
-    fun startListening() {
-        speechEngineManager.startListening { transcribed ->
-            sendMessage(transcribed)
-        }
-    }
-
-    fun stopListening() {
-        speechEngineManager.stopListening()
     }
 
     fun createNewSession() {
@@ -252,13 +211,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(promptText: String) {
         if (promptText.isBlank() || _isGenerating.value) return
 
-        // If active model is not downloaded/ready, trigger its download and notify
         val model = selectedModel.value
+        // If active model is not downloaded yet, queue prompt and initiate download
         if (!model.isReadyToLoad) {
-            downloadHuggingFaceModel(model)
+            pendingPrompt = promptText
+            downloadModel(model)
             return
         }
 
+        // If downloaded but unloaded, ensure it is loaded
+        if (modelEngineManager.loadState.value != ModelLoadState.LOADED) {
+            viewModelScope.launch {
+                val file = downloadManager.getModelFile(model.id)
+                modelEngineManager.loadModel(model, file)
+                executePromptStream(promptText, model)
+            }
+            return
+        }
+
+        executePromptStream(promptText, model)
+    }
+
+    private fun executePromptStream(promptText: String, model: ModelProfile) {
         generationJob = viewModelScope.launch {
             var activeSessionId = _currentSessionId.value
             if (activeSessionId == null) {
@@ -267,7 +241,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val newSession = ChatSessionEntity(
                     id = newId,
                     title = sessionTitle,
-                    modelId = selectedModel.value.shortName
+                    modelId = model.shortName
                 )
                 repository.createSession(newSession)
                 _currentSessionId.value = newId
@@ -353,11 +327,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 repository.insertMessage(assistantMsg)
 
-                // 5. If TTS is active, read the assistant's answer aloud
-                if (isTtsEnabled.value && assistantMsg.content.isNotBlank()) {
-                    speak(assistantMsg.content)
-                }
-
                 // Clear streaming buffers
                 streamingReasoning.value = ""
                 streamingContent.value = ""
@@ -376,6 +345,5 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         onAppStop()
-        speechEngineManager.shutdown()
     }
 }

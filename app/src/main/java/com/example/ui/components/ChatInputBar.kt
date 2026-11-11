@@ -1,22 +1,7 @@
 package com.example.ui.components
 
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,10 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,9 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -66,16 +45,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
-import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.GptEmerald
 import com.example.ui.theme.ReasoningAmber
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
-import com.example.ui.theme.TelemetryCyan
-import com.example.ui.theme.TerminalGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -84,46 +59,14 @@ import com.example.ui.theme.TextSecondary
 fun ChatInputBar(
     isGenerating: Boolean,
     searchEnabled: Boolean,
-    isListening: Boolean,
-    recognizedVoiceText: String,
+    modelName: String,
     onToggleSearch: (Boolean) -> Unit,
     onSendMessage: (String) -> Unit,
     onStopGenerating: () -> Unit,
-    onStartListening: () -> Unit,
-    onStopListening: () -> Unit,
-    onOpenVoiceSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     val canSend = text.isNotBlank() && !isGenerating
-
-    // Sync speech to text
-    LaunchedEffect(recognizedVoiceText) {
-        if (recognizedVoiceText.isNotBlank()) {
-            text = recognizedVoiceText
-        }
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            onStartListening()
-        }
-    }
-
-    // Pulse animation when listening
-    val infiniteTransition = rememberInfiniteTransition(label = "micPulse")
-    val micScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "micScale"
-    )
 
     var plusMenuExpanded by remember { mutableStateOf(false) }
 
@@ -139,37 +82,7 @@ fun ChatInputBar(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
-            // Voice Listening Status Banner (only shown if actively listening)
-            AnimatedVisibility(visible = isListening) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(ErrorRed.copy(alpha = 0.2f))
-                        .border(1.dp, ErrorRed.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(ErrorRed)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Listening… Speak now",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = ErrorRed,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-            }
-
-            // Modern Floating Input Container with [+] Tools Menu, TextField, Mic & Send
+            // Modern Floating Input Container with [+] Tools Menu, TextField & Send/Stop Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -177,13 +90,13 @@ fun ChatInputBar(
                     .background(SurfaceElevated)
                     .border(
                         1.dp,
-                        if (isListening) ErrorRed else if (searchEnabled) ReasoningAmber.copy(alpha = 0.6f) else BorderSubtle,
+                        if (searchEnabled) ReasoningAmber.copy(alpha = 0.6f) else BorderSubtle,
                         RoundedCornerShape(26.dp)
                     )
                     .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // [+] Menu Button for Tools & Features (Web Search, etc.)
+                // [+] Menu Button for Tools & Features (DuckDuckGo Web Search)
                 Box {
                     IconButton(
                         onClick = { plusMenuExpanded = true },
@@ -230,7 +143,7 @@ fun ChatInputBar(
                                         }
                                     }
                                     Text(
-                                        text = if (searchEnabled) "Active: live queries injected with date" else "Disabled: on-device model only",
+                                        text = if (searchEnabled) "Active: queries injected with system date" else "Disabled: on-device model only",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             color = if (searchEnabled) GptEmerald else TextMuted,
                                             fontSize = 11.sp
@@ -285,9 +198,7 @@ fun ChatInputBar(
                         ) {
                             if (text.isEmpty()) {
                                 Text(
-                                    text = if (isListening) "Listening to voice input…"
-                                    else if (searchEnabled) "Search web & message on-device model…"
-                                    else "Message on-device model…",
+                                    text = if (searchEnabled) "Search web & message $modelName…" else "Message $modelName…",
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         color = TextMuted,
                                         fontSize = 14.5.sp
@@ -301,43 +212,7 @@ fun ChatInputBar(
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // Microphone (STT) Button
-                IconButton(
-                    onClick = {
-                        if (isListening) {
-                            onStopListening()
-                        } else {
-                            val hasPermission = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-
-                            if (hasPermission) {
-                                onStartListening()
-                            } else {
-                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(if (isListening) ErrorRed.copy(alpha = 0.25f) else SurfaceDark.copy(alpha = 0.4f))
-                        .testTag("mic_stt_button")
-                ) {
-                    Icon(
-                        imageVector = if (isListening) Icons.Default.GraphicEq else Icons.Default.Mic,
-                        contentDescription = "Voice Input STT",
-                        tint = if (isListening) ErrorRed else TextSecondary,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .then(if (isListening) Modifier.scale(micScale) else Modifier)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Send or Stop Button (ChatGPT style solid white/black or dark circle)
+                // Send or Stop Button
                 if (isGenerating) {
                     IconButton(
                         onClick = onStopGenerating,

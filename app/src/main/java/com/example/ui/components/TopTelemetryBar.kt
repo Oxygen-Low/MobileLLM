@@ -60,11 +60,9 @@ fun TopTelemetryBar(
     memoryMb: Int,
     currentTps: Double,
     currentDate: String,
-    isTtsEnabled: Boolean,
     onOpenModelsHub: () -> Unit,
     onToggleHistory: () -> Unit,
     onNewChat: () -> Unit,
-    onToggleTts: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -119,22 +117,8 @@ fun TopTelemetryBar(
                     )
                 }
 
-                // Actions: TTS Toggle, New Chat, History
+                // Actions: New Chat, History
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // TTS Voice Output Toggle
-                    IconButton(
-                        onClick = onToggleTts,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .testTag("tts_toggle_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = "Text to Speech",
-                            tint = if (isTtsEnabled) GptEmerald else TextMuted,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
 
                     // Chat History
                     IconButton(

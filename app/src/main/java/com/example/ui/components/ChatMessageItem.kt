@@ -80,7 +80,6 @@ fun ChatMessageItem(
     message: ChatMessageEntity,
     modelName: String,
     isStreaming: Boolean = false,
-    onSpeak: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -161,7 +160,7 @@ fun ChatMessageItem(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Understated Corporate Action Footer (Copy, TTS, Metrics)
+                        // Understated Action Footer (Copy, Metrics)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -191,21 +190,8 @@ fun ChatMessageItem(
                                 }
                             }
 
-                            // Right: Minimal action icons (Copy, Read Aloud)
+                            // Right: Minimal action icons (Copy)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (onSpeak != null) {
-                                    IconButton(
-                                        onClick = { onSpeak(message.content) },
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.VolumeUp,
-                                            contentDescription = "Read Aloud (TTS)",
-                                            tint = TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
 
                                 var copied by remember { mutableStateOf(false) }
                                 IconButton(
