@@ -33,13 +33,17 @@ object PromptFormat {
         system: String,
         turns: List<Turn>,
         enableThinking: Boolean,
-        today: String
+        today: String,
+        reasoningLevel: ReasoningLevel =
+            if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
     ): String {
         var reasoningMode = if (enableThinking) "/think" else "/no_think"
         if (system.contains("/no_think")) {
             reasoningMode = "/no_think"
         } else if (system.contains("/think")) {
             reasoningMode = "/think"
+        } else if (!reasoningLevel.usesThinking) {
+            reasoningMode = "/no_think"
         }
 
         val customInstructions = system
@@ -63,6 +67,13 @@ object PromptFormat {
                 customInstructions.isNotBlank() -> prompt.append(customInstructions).append("\n\n")
                 reasoningMode == "/think" -> prompt.append(THINK_SYSTEM).append("\n\n")
                 else -> prompt.append(NO_THINK_SYSTEM).append("\n\n")
+            }
+            if (reasoningMode == "/think") {
+                // The model only has a binary native switch (/think vs
+                // /no_think), so the requested depth is expressed as a
+                // graduated instruction on top of its thinking system prompt.
+                val effort = if (reasoningLevel.usesThinking) reasoningLevel else ReasoningLevel.DEFAULT
+                prompt.append(effort.instruction).append("\n\n")
             }
         }
 

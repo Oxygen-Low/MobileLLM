@@ -153,7 +153,9 @@ class ModelEngineManager(
         searchEnabled: Boolean,
         systemDate: String = mcpToolExecutor.getCurrentFormattedDate(),
         history: List<PromptFormat.Turn> = emptyList(),
-        enableThinking: Boolean = true
+        enableThinking: Boolean = true,
+        reasoningLevel: ReasoningLevel =
+            if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
     ): Flow<GenerationEvent> = callbackFlow {
         val activeHandle = handle
         val model = _currentModel.value
@@ -189,7 +191,8 @@ class ModelEngineManager(
                     system = system,
                     turns = turns,
                     enableThinking = enableThinking,
-                    today = templateDate()
+                    today = templateDate(),
+                    reasoningLevel = reasoningLevel
                 )
 
                 val promptTokens = runCatching {
@@ -221,7 +224,9 @@ class ModelEngineManager(
                 val result = LlamaBridge.nativeGenerate(
                     handle = activeHandle,
                     prompt = renderedPrompt,
-                    maxTokens = MAX_NEW_TOKENS,
+                    // Deeper reasoning levels get a larger generation budget so
+                    // the model can actually spend tokens on thinking.
+                    maxTokens = reasoningLevel.maxNewTokens,
                     temperature = TEMPERATURE,
                     topK = TOP_K,
                     topP = TOP_P,
@@ -332,7 +337,6 @@ class ModelEngineManager(
 
         const val MAX_CONTEXT = 4096
         const val MAX_THREADS = 6
-        const val MAX_NEW_TOKENS = 640
 
         const val TEMPERATURE = 0.6f
         const val TOP_K = 40

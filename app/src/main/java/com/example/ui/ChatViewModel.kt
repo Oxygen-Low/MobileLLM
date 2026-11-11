@@ -15,6 +15,7 @@ import com.example.model.ModelEngineManager
 import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.model.PromptFormat
+import com.example.model.ReasoningLevel
 import com.example.tools.MCPToolExecutor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +67,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _searchEnabled = MutableStateFlow(false)
     val searchEnabled: StateFlow<Boolean> = _searchEnabled.asStateFlow()
+
+    private val _reasoningLevel = MutableStateFlow(ReasoningLevel.DEFAULT)
+    val reasoningLevel: StateFlow<ReasoningLevel> = _reasoningLevel.asStateFlow()
 
     // Streaming state for the active message
     val streamingReasoning = MutableStateFlow("")
@@ -202,6 +206,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _searchEnabled.value = enabled
     }
 
+    fun setReasoningLevel(level: ReasoningLevel) {
+        _reasoningLevel.value = level
+    }
+
     fun createNewSession() {
         val newId = UUID.randomUUID().toString()
         val session = ChatSessionEntity(
@@ -301,13 +309,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             var finalContent = ""
 
             // 3. Collect from ModelEngineManager stream
+            // Models without a thinking mode always run with reasoning disabled.
+            val reasoningLevel = if (model.supportsReasoning) {
+                _reasoningLevel.value
+            } else {
+                ReasoningLevel.NONE
+            }
             try {
                 modelEngineManager.generateStream(
                     prompt = promptText,
                     searchEnabled = _searchEnabled.value,
                     systemDate = currentDate,
                     history = history,
-                    enableThinking = model.supportsReasoning
+                    enableThinking = reasoningLevel.usesThinking,
+                    reasoningLevel = reasoningLevel
                 ).collect { event ->
                     when (event) {
                         is GenerationEvent.ToolExecuting -> {

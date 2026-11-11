@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.model.PromptFormat
+import com.example.model.ReasoningLevel
 import com.example.model.ThinkStreamSplitter
 import com.example.model.Utf8StreamDecoder
 import org.junit.Assert.assertEquals
@@ -44,6 +45,40 @@ class PromptFormatTest {
         assertTrue(prompt.contains("Reasoning Mode: /no_think"))
         assertTrue(prompt.contains("## Custom Instructions\n\nAnswer briefly\n\n"))
         assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n\n</think>\n"))
+    }
+
+    @Test
+    fun `reasoning levels switch think mode and add depth guidance`() {
+        val none = PromptFormat.smolLM3(
+            system = "Answer nicely",
+            turns = listOf(PromptFormat.Turn("user", "Hi")),
+            enableThinking = true,
+            today = "11 November 2026",
+            reasoningLevel = ReasoningLevel.NONE
+        )
+        assertTrue(none.contains("Reasoning Mode: /no_think\n\n"))
+        assertTrue(none.endsWith("<|im_start|>assistant\n<think>\n\n</think>\n"))
+
+        val low = PromptFormat.smolLM3(
+            system = "Answer nicely",
+            turns = listOf(PromptFormat.Turn("user", "Hi")),
+            enableThinking = true,
+            today = "11 November 2026",
+            reasoningLevel = ReasoningLevel.LOW
+        )
+        assertTrue(low.contains("Reasoning Mode: /think\n\n"))
+        assertTrue(low.contains("Keep reasoning brief"))
+
+        val max = PromptFormat.smolLM3(
+            system = "Answer nicely",
+            turns = listOf(PromptFormat.Turn("user", "Hi")),
+            enableThinking = true,
+            today = "11 November 2026",
+            reasoningLevel = ReasoningLevel.MAX
+        )
+        assertTrue(max.contains("Reasoning Mode: /think\n\n"))
+        assertTrue(max.contains("Reason as much as possible"))
+        assertTrue(!max.endsWith("<think>\n\n</think>\n"))
     }
 
     @Test
