@@ -1,6 +1,8 @@
 package com.example
 
 import com.example.model.GgufParser
+import com.example.model.Llama2Engine
+import com.example.model.LlamaTokenizer
 import com.example.model.ModelProfile
 import com.example.model.SafeTensorsParser
 import com.example.tools.MCPToolExecutor
@@ -52,11 +54,19 @@ class ExampleRobolectricTest {
     fun testDefaultModelProfiles() {
         assertEquals("deepsmollm3", ModelProfile.DEEP_SMOLLM3.id)
         assertEquals("3B", ModelProfile.DEEP_SMOLLM3.parameters)
+        assertEquals("BF16", ModelProfile.DEEP_SMOLLM3.quantization)
+        assertEquals("DeepSmolLM3-3B.BF16.gguf", ModelProfile.DEEP_SMOLLM3.modelScopeFile)
         assertTrue(ModelProfile.DEEP_SMOLLM3.supportsReasoning)
-        assertEquals("smollm3", ModelProfile.SMOLLM3.id)
-        assertEquals("3B", ModelProfile.SMOLLM3.parameters)
-        assertFalse(ModelProfile.SMOLLM3.supportsReasoning)
-        assertEquals(2, ModelProfile.DEFAULT_MODELS.size)
+        assertEquals("Oxygen-Low/DeepSmolLM3-3B", ModelProfile.DEEP_SMOLLM3.modelScopeRepo)
+        assertEquals(1, ModelProfile.DEFAULT_MODELS.size)
+    }
+
+    @Test
+    fun testLlamaTokenizerEncoding() {
+        val tokenizer = LlamaTokenizer()
+        val tokens = tokenizer.encode("Hello world")
+        assertTrue(tokens.isNotEmpty())
+        assertEquals(1, tokens[0]) // BOS token
     }
 
     @Test

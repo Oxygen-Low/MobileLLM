@@ -70,7 +70,7 @@ object GgufParser {
             var architecture = "llama"
             var contextLength = 4096
             var modelName = "GGUF Model"
-            var quantType = "Q4_K_M"
+            var quantType = "BF16"
 
             // Parse key-value pairs safely
             var kvParsed = 0
