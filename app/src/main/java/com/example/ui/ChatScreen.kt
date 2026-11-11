@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ChatMessageEntity
 import com.example.model.ModelDownloadState
+import com.example.model.ModelLoadState
 import com.example.ui.components.ChatInputBar
 import com.example.ui.components.ChatMessageItem
 import com.example.ui.components.ModelsHubSheet
@@ -61,6 +62,7 @@ import com.example.ui.components.TopTelemetryBar
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
+import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TelemetryCyan
@@ -78,6 +80,7 @@ fun ChatScreen(
     val availableModels by viewModel.availableModels.collectAsStateWithLifecycle()
     val downloadStates by viewModel.downloadStates.collectAsStateWithLifecycle()
     val loadState by viewModel.loadState.collectAsStateWithLifecycle()
+    val modelError by viewModel.modelError.collectAsStateWithLifecycle()
     val memoryMb by viewModel.allocatedMemoryMb.collectAsStateWithLifecycle()
     val currentTps by viewModel.currentTps.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -261,6 +264,30 @@ fun ChatScreen(
                                         )
                                     )
                                 }
+                            }
+
+                            val downloadError = downloadInfo?.error
+                                ?.takeIf { downloadInfo?.state == ModelDownloadState.ERROR }
+                            if (downloadError != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Download failed: $downloadError",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        color = ErrorRed,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            } else if (modelError != null && loadState == ModelLoadState.ERROR) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Model failed to load: $modelError",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        color = ErrorRed,
+                                        fontSize = 11.sp
+                                    )
+                                )
                             }
                         }
                     }

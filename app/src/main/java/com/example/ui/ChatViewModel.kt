@@ -14,12 +14,14 @@ import com.example.model.ModelDownloadState
 import com.example.model.ModelEngineManager
 import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
+import com.example.model.PromptFormat
 import com.example.tools.MCPToolExecutor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -40,6 +42,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val downloadStates: StateFlow<Map<String, DownloadProgressInfo>> = downloadManager.downloadStates
 
     val loadState: StateFlow<ModelLoadState> = modelEngineManager.loadState
+    val modelError: StateFlow<String?> = modelEngineManager.lastError
     val allocatedMemoryMb: StateFlow<Int> = modelEngineManager.allocatedMemoryMb
     val currentTps: StateFlow<Double> = modelEngineManager.currentTps
     val currentDate: String = mcpToolExecutor.getCurrentFormattedDate()
@@ -107,7 +110,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 modelId = model.id,
                 repo = model.modelScopeRepo,
                 filename = model.modelScopeFile,
-                totalMb = model.downloadSizeMb
+                totalMb = model.downloadSizeMb,
+                hfRepo = model.hfRepo,
+                hfFilename = model.hfFile
             ) { downloadedFile ->
                 // Update model state to DOWNLOADED
                 val updated = availableModels.value.map {
@@ -248,6 +253,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 activeSessionId = newId
             }
 
+            // Capture the conversation so far before the new user turn is stored.
+            val history = loadHistory(activeSessionId)
+
             // 1. Insert User Message
             val userMsg = ChatMessageEntity(
                 id = UUID.randomUUID().toString(),
@@ -275,7 +283,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 modelEngineManager.generateStream(
                     prompt = promptText,
                     searchEnabled = _searchEnabled.value,
-                    systemDate = currentDate
+                    systemDate = currentDate,
+                    history = history,
+                    enableThinking = model.supportsReasoning
                 ).collect { event ->
                     when (event) {
                         is GenerationEvent.ToolExecuting -> {
@@ -337,6 +347,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Builds conversation context from previously stored turns, trimmed from the
+     * oldest message until it fits the prompt budget of an on-device model.
+     */
+    private suspend fun loadHistory(sessionId: String): List<PromptFormat.Turn> {
+        return try {
+            val turns = repository.getMessagesForSession(sessionId).first()
+                .filter { it.role == "user" || it.role == "assistant" }
+                .takeLast(MAX_HISTORY_MESSAGES)
+                .mapNotNull { message ->
+                    val text = message.content.trim().take(MAX_HISTORY_CHARS_PER_MESSAGE)
+                    if (text.isEmpty()) null else PromptFormat.Turn(message.role, text)
+                }
+
+            var budget = MAX_HISTORY_CHARS_TOTAL
+            val selected = ArrayDeque<PromptFormat.Turn>()
+            for (turn in turns.asReversed()) {
+                if (turn.content.length > budget) break
+                budget -= turn.content.length
+                selected.addFirst(turn)
+            }
+            selected.toList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     fun stopGeneration() {
         generationJob?.cancel()
         _isGenerating.value = false
@@ -345,5 +382,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         onAppStop()
+    }
+
+    private companion object {
+        const val MAX_HISTORY_MESSAGES = 10
+        const val MAX_HISTORY_CHARS_PER_MESSAGE = 2000
+        const val MAX_HISTORY_CHARS_TOTAL = 6000
     }
 }

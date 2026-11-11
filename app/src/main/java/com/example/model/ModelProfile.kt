@@ -18,10 +18,14 @@ data class ModelProfile(
     val memoryMb: Int,
     val description: String = "",
     val supportsReasoning: Boolean,
+    /** ModelScope repository slug, used as the first download source. */
     val modelScopeRepo: String? = null,
     val modelScopeFile: String? = null,
     val modelScopeUrl: String? = null,
-    val downloadSizeMb: Int = 5870,
+    /** Hugging Face repository slug, used as a fallback download source. */
+    val hfRepo: String? = null,
+    val hfFile: String? = null,
+    val downloadSizeMb: Int = 0,
     val downloadState: ModelDownloadState = ModelDownloadState.NOT_DOWNLOADED,
     val downloadProgress: Float = 0f
 ) {
@@ -29,20 +33,30 @@ data class ModelProfile(
         get() = downloadState == ModelDownloadState.DOWNLOADED
 
     companion object {
+        /**
+         * The only model currently shipped by the app.
+         *
+         * Q4_K_M is the smallest quantisation of this checkpoint that keeps
+         * output quality intact while fitting a 3B model in ~2 GB of RAM.
+         * Swap [modelScopeFile]/[hfFile] for `DeepSmolLM3-3B.BF16.gguf`
+         * (5873 MB) on devices with enough memory.
+         */
         val DEEP_SMOLLM3 = ModelProfile(
             id = "deepsmollm3",
-            name = "DeepSmolLM3 (BF16)",
+            name = "DeepSmolLM3-3B",
             shortName = "DeepSmolLM3",
             format = ModelFormat.GGUF,
-            quantization = "BF16",
+            quantization = "Q4_K_M",
             parameters = "3B",
             contextLength = 8192,
-            memoryMb = 5870,
-            downloadSizeMb = 5870,
+            memoryMb = 2300,
+            downloadSizeMb = 1827,
             modelScopeRepo = "Oxygen-Low/DeepSmolLM3-3B",
-            modelScopeFile = "DeepSmolLM3-3B.BF16.gguf",
-            modelScopeUrl = "https://modelscope.cn/models/Oxygen-Low/DeepSmolLM3-3B",
-            description = "3B bfloat16 (BF16) mobile GGUF model with DeepSeek v4.1-style dual-mode reasoning (<think>...</think>)",
+            modelScopeFile = "DeepSmolLM3-3B.Q4_K_M.gguf",
+            hfRepo = "Oxygen-Low/DeepSmolLM3-3B",
+            hfFile = "DeepSmolLM3-3B.Q4_K_M.gguf",
+            modelScopeUrl = "https://huggingface.co/Oxygen-Low/DeepSmolLM3-3B",
+            description = "3B SmolLM3 fine-tune (DeepSeek-V4 reasoning distillation) with dual-mode <think> reasoning, running fully on-device via llama.cpp.",
             supportsReasoning = true,
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )

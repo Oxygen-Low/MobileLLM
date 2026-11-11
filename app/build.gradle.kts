@@ -12,6 +12,14 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  // llama.cpp is compiled with the NDK that ships in .toolchain/ when present
+  // (keeps the build self-contained without a system-wide NDK install).
+  val bundledNdk = rootProject.file(".toolchain/android-ndk-r27d")
+  ndkVersion = "27.3.13750724"
+  if (bundledNdk.isDirectory) {
+    ndkPath = bundledNdk.absolutePath
+  }
+
   defaultConfig {
     applicationId = "com.aistudio.pocketlm.krfxwq"
     minSdk = 24
@@ -20,6 +28,24 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    ndk {
+      abiFilters += listOf("arm64-v8a", "x86_64")
+    }
+
+    externalNativeBuild {
+      cmake {
+        arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release")
+        cppFlags += listOf("-O3", "-fexceptions", "-frtti")
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = "3.22.1"
+    }
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

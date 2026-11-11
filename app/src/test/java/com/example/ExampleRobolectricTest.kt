@@ -54,8 +54,9 @@ class ExampleRobolectricTest {
     fun testDefaultModelProfiles() {
         assertEquals("deepsmollm3", ModelProfile.DEEP_SMOLLM3.id)
         assertEquals("3B", ModelProfile.DEEP_SMOLLM3.parameters)
-        assertEquals("BF16", ModelProfile.DEEP_SMOLLM3.quantization)
-        assertEquals("DeepSmolLM3-3B.BF16.gguf", ModelProfile.DEEP_SMOLLM3.modelScopeFile)
+        assertEquals("Q4_K_M", ModelProfile.DEEP_SMOLLM3.quantization)
+        assertEquals("DeepSmolLM3-3B.Q4_K_M.gguf", ModelProfile.DEEP_SMOLLM3.modelScopeFile)
+        assertEquals("DeepSmolLM3-3B.Q4_K_M.gguf", ModelProfile.DEEP_SMOLLM3.hfFile)
         assertTrue(ModelProfile.DEEP_SMOLLM3.supportsReasoning)
         assertEquals("Oxygen-Low/DeepSmolLM3-3B", ModelProfile.DEEP_SMOLLM3.modelScopeRepo)
         assertEquals(1, ModelProfile.DEFAULT_MODELS.size)

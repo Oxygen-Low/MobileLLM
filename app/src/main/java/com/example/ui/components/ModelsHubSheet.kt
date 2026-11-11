@@ -51,6 +51,7 @@ import com.example.model.ModelDownloadState
 import com.example.model.ModelProfile
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
+import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TelemetryCyan
@@ -319,6 +320,20 @@ private fun ModelCard(
                         )
                     )
                 }
+            }
+
+            val downloadError = downloadInfo?.error
+                ?.takeIf { downloadInfo?.state == ModelDownloadState.ERROR }
+            if (downloadError != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Download failed: $downloadError",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        color = ErrorRed
+                    )
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))

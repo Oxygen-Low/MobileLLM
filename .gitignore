@@ -16,3 +16,9 @@
 local.properties
 .env
 debug.keystore
+.toolchain
+/.cxx
+/app/.cxx
+.tmp
+build-log.txt
+test-log.txt
