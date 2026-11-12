@@ -44,6 +44,33 @@ object PromptFormat {
         else -> "/no_think"
     }
 
+    /**
+     * Renders [system] and [turns] with the chat template belonging to [style].
+     */
+    fun render(
+        style: PromptStyle,
+        system: String,
+        turns: List<Turn>,
+        enableThinking: Boolean,
+        today: String,
+        reasoningLevel: ReasoningLevel =
+            if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
+    ): String = when (style) {
+        PromptStyle.SMOLLM3 -> smolLM3(
+            system = system,
+            turns = turns,
+            enableThinking = enableThinking,
+            today = today,
+            reasoningLevel = reasoningLevel
+        )
+        PromptStyle.QWEN3 -> qwen3(
+            system = system,
+            turns = turns,
+            enableThinking = enableThinking,
+            reasoningLevel = reasoningLevel
+        )
+    }
+
     fun smolLM3(
         system: String,
         turns: List<Turn>,
@@ -103,6 +130,62 @@ object PromptFormat {
         } else {
             // Prefill the opening tag so the model is forced to continue inside
             // a reasoning block instead of silently skipping the think phase.
+            prompt.append("<think>\n")
+        }
+
+        return prompt.toString()
+    }
+
+    /**
+     * ChatML rendering for the Qwen3 family.
+     *
+     * Qwen3 ships a `chat_template.jinja` that is plain ChatML plus a soft
+     * reasoning switch. Thinking is disabled by prefilling an empty
+     * `<think></think>` block rather than by relying on the model's
+     * `/no_think` instruction, which the small 0.6B checkpoint does not always
+     * follow.
+     */
+    fun qwen3(
+        system: String,
+        turns: List<Turn>,
+        enableThinking: Boolean,
+        reasoningLevel: ReasoningLevel =
+            if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
+    ): String {
+        val reasoningMode = resolveReasoningMode(system, enableThinking, reasoningLevel)
+
+        val customInstructions = system
+            .replace("/no_think", "")
+            .replace("/think", "")
+            .trim()
+
+        val prompt = StringBuilder(256 + turns.sumOf { it.content.length })
+        if (customInstructions.isNotEmpty()) {
+            prompt.append("<|im_start|>system\n").append(customInstructions)
+            if (reasoningMode == "/think" && reasoningLevel.usesThinking) {
+                prompt.append("\n\n").append(reasoningLevel.instruction)
+            }
+            prompt.append("<|im_end|>\n")
+        } else if (reasoningMode == "/no_think") {
+            prompt.append("<|im_start|>system\n/no_think<|im_end|>\n")
+        }
+
+        for (turn in turns) {
+            if (turn.role == "assistant") {
+                prompt.append("<|im_start|>assistant\n")
+                    .append(turn.content.trimStart('\n'))
+                    .append("<|im_end|>\n")
+            } else {
+                prompt.append("<|im_start|>user\n")
+                    .append(turn.content)
+                    .append("<|im_end|>\n")
+            }
+        }
+
+        prompt.append("<|im_start|>assistant\n")
+        if (reasoningMode == "/no_think") {
+            prompt.append("<think>\n\n</think>\n")
+        } else {
             prompt.append("<think>\n")
         }
 

@@ -59,7 +59,12 @@ class ExampleRobolectricTest {
         assertEquals("DeepSmolLM3-3B.Q4_K_M.gguf", ModelProfile.DEEP_SMOLLM3.hfFile)
         assertTrue(ModelProfile.DEEP_SMOLLM3.supportsReasoning)
         assertEquals("Oxygen-Low/DeepSmolLM3-3B", ModelProfile.DEEP_SMOLLM3.modelScopeRepo)
-        assertEquals(1, ModelProfile.DEFAULT_MODELS.size)
+        assertEquals("qwen3-0.6b", ModelProfile.QWEN3_0_6B.id)
+        assertEquals("Q8_0", ModelProfile.QWEN3_0_6B.quantization)
+        assertEquals("Qwen3-0.6B-Q8_0.gguf", ModelProfile.QWEN3_0_6B.hfFile)
+        assertEquals("Qwen/Qwen3-0.6B-GGUF", ModelProfile.QWEN3_0_6B.hfRepo)
+        assertTrue(ModelProfile.QWEN3_0_6B.supportsReasoning)
+        assertEquals(2, ModelProfile.DEFAULT_MODELS.size)
     }
 
     @Test

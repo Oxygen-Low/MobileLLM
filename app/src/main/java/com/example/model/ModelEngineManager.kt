@@ -185,9 +185,10 @@ class ModelEngineManager(
                     if (result.success) grounding = result.result.take(MAX_GROUNDING_CHARS)
                 }
 
-                val system = buildSystemPrompt(systemDate, grounding, sourceUrl)
+                val system = buildSystemPrompt(model.name, systemDate, grounding, sourceUrl)
                 val turns = history + PromptFormat.Turn("user", prompt)
-                val renderedPrompt = PromptFormat.smolLM3(
+                val renderedPrompt = PromptFormat.render(
+                    style = model.promptStyle,
                     system = system,
                     turns = turns,
                     enableThinking = enableThinking,
@@ -312,9 +313,15 @@ class ModelEngineManager(
         }
     }
 
-    private fun buildSystemPrompt(systemDate: String, grounding: String, sourceUrl: String?): String {
+    private fun buildSystemPrompt(
+        modelName: String,
+        systemDate: String,
+        grounding: String,
+        sourceUrl: String?
+    ): String {
         val builder = StringBuilder()
-        builder.append("You are DeepSmolLM3, a helpful assistant running entirely on the user's device.")
+        builder.append("You are ").append(modelName)
+            .append(", a helpful assistant running entirely on the user's device.")
         builder.append(" Today's date is ").append(systemDate).append('.')
         builder.append(" Answer in markdown. Be concise but complete.")
 

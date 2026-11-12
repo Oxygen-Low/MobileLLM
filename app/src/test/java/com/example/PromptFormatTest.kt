@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.model.PromptFormat
+import com.example.model.PromptStyle
 import com.example.model.ReasoningLevel
 import com.example.model.ThinkStreamSplitter
 import com.example.model.Utf8StreamDecoder
@@ -110,6 +111,44 @@ class PromptFormatTest {
 
         assertTrue(prompt.startsWith("<|im_start|>system\nCustom prompt only<|im_end|>\n"))
         assertTrue(!prompt.contains("## Metadata"))
+    }
+
+    @Test
+    fun `qwen3 prompt uses plain chatml and prefills think`() {
+        val prompt = PromptFormat.qwen3(
+            system = "Be helpful",
+            turns = listOf(PromptFormat.Turn("user", "Hello")),
+            enableThinking = true
+        )
+
+        assertTrue(prompt.startsWith("<|im_start|>system\nBe helpful\n\n"))
+        assertTrue(!prompt.contains("## Metadata"))
+        assertTrue(prompt.endsWith("<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n"))
+    }
+
+    @Test
+    fun `qwen3 no-think mode closes an empty think block`() {
+        val prompt = PromptFormat.qwen3(
+            system = "Be helpful",
+            turns = listOf(PromptFormat.Turn("user", "Hi")),
+            enableThinking = true,
+            reasoningLevel = ReasoningLevel.NONE
+        )
+
+        assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n\n</think>\n"))
+    }
+
+    @Test
+    fun `render dispatches to the model prompt style`() {
+        val prompt = PromptFormat.render(
+            style = PromptStyle.QWEN3,
+            system = "Be helpful",
+            turns = listOf(PromptFormat.Turn("user", "Hello")),
+            enableThinking = false,
+            today = "11 November 2026"
+        )
+
+        assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n\n</think>\n"))
     }
 }
 

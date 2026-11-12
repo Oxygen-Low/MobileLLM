@@ -7,6 +7,12 @@ enum class ModelDownloadState {
     ERROR
 }
 
+/** Chat template family used to render prompts for a model. */
+enum class PromptStyle {
+    SMOLLM3,
+    QWEN3
+}
+
 data class ModelProfile(
     val id: String,
     val name: String,
@@ -18,6 +24,8 @@ data class ModelProfile(
     val memoryMb: Int,
     val description: String = "",
     val supportsReasoning: Boolean,
+    /** Chat template family used by this model. */
+    val promptStyle: PromptStyle = PromptStyle.SMOLLM3,
     /** ModelScope repository slug, used as the first download source. */
     val modelScopeRepo: String? = null,
     val modelScopeFile: String? = null,
@@ -34,7 +42,7 @@ data class ModelProfile(
 
     companion object {
         /**
-         * The only model currently shipped by the app.
+         * The larger default model shipped by the app.
          *
          * Q4_K_M is the smallest quantisation of this checkpoint that keeps
          * output quality intact while fitting a 3B model in ~2 GB of RAM.
@@ -61,6 +69,32 @@ data class ModelProfile(
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )
 
-        val DEFAULT_MODELS = listOf(DEEP_SMOLLM3)
+        /**
+         * Qwen3's official 0.6B GGUF release (Q8_0, the only quant shipped in
+         * the upstream repo). Small enough to stay comfortably in RAM on most
+         * phones while still supporting Qwen's hybrid thinking mode.
+         */
+        val QWEN3_0_6B = ModelProfile(
+            id = "qwen3-0.6b",
+            name = "Qwen3-0.6B",
+            shortName = "Qwen3",
+            format = ModelFormat.GGUF,
+            quantization = "Q8_0",
+            parameters = "0.6B",
+            contextLength = 32768,
+            memoryMb = 900,
+            downloadSizeMb = 610,
+            modelScopeRepo = "Qwen/Qwen3-0.6B-GGUF",
+            modelScopeFile = "Qwen3-0.6B-Q8_0.gguf",
+            hfRepo = "Qwen/Qwen3-0.6B-GGUF",
+            hfFile = "Qwen3-0.6B-Q8_0.gguf",
+            modelScopeUrl = "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF",
+            description = "Qwen3 0.6B (Q8_0) with switchable thinking mode, running fully on-device via llama.cpp.",
+            supportsReasoning = true,
+            promptStyle = PromptStyle.QWEN3,
+            downloadState = ModelDownloadState.NOT_DOWNLOADED
+        )
+
+        val DEFAULT_MODELS = listOf(DEEP_SMOLLM3, QWEN3_0_6B)
     }
 }
