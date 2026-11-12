@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,18 +106,36 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
 
+    // True while the transcript is parked at the bottom. Once the user scrolls up
+    // to read, this turns false and streaming updates stop chasing them.
+    val isAtBottom by remember(listState) {
+        derivedStateOf { !listState.canScrollForward }
+    }
+
+    val transcriptSize = messages.size + if (isGenerating) 1 else 0
+
     val downloadInfo = downloadStates[currentModel.id]
     val isCurrentDownloaded = currentModel.downloadState == ModelDownloadState.DOWNLOADED ||
             downloadInfo?.state == ModelDownloadState.DOWNLOADED
     val isCurrentDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
 
-    // Auto-scroll to bottom on new messages
-    LaunchedEffect(messages.size, streamingContent.length, streamingReasoning.length) {
-        if (messages.isNotEmpty() || isGenerating) {
-            val targetIdx = (messages.size + if (isGenerating) 1 else 0) - 1
-            if (targetIdx >= 0) {
-                listState.animateScrollToItem(targetIdx)
-            }
+    // New message (user send or finalized reply): glide to the bottom. A message
+    // the user just sent always pulls the view down; otherwise only follow when
+    // the user is already at the bottom.
+    LaunchedEffect(transcriptSize) {
+        val userJustSent = messages.lastOrNull()?.role == "user"
+        if (transcriptSize > 0 && (isAtBottom || userJustSent)) {
+            listState.animateScrollToItem(transcriptSize - 1)
+        }
+    }
+
+    // Streaming text grows the last item several times a second. Follow it with a
+    // snap instead of starting a fresh animation per token - restarting an
+    // animation that fast is what made mid-generation scrolling stutter.
+    LaunchedEffect(streamingContent.length, streamingReasoning.length) {
+        val hasStreamedText = streamingContent.isNotEmpty() || streamingReasoning.isNotEmpty()
+        if (isGenerating && hasStreamedText && transcriptSize > 0 && isAtBottom) {
+            listState.scrollToItem(transcriptSize - 1)
         }
     }
 
