@@ -136,8 +136,12 @@ fun ChatMessageItem(
                     Spacer(modifier = Modifier.height(6.dp))
                 }
 
-                // Reasoning Accordion (Unsloth / ChatGPT / Gemini style)
-                if (!message.reasoningContent.isNullOrBlank() || isStreaming) {
+                // Reasoning Accordion (ChatGPT style). While waiting for the first
+                // token we show "Thinking…"; it disappears if the model answers
+                // without emitting a reasoning trace.
+                if (!message.reasoningContent.isNullOrBlank() ||
+                    (isStreaming && message.content.isBlank())
+                ) {
                     ReasoningAccordion(
                         reasoningText = message.reasoningContent ?: "",
                         isStreaming = isStreaming,
