@@ -76,6 +76,9 @@ jobs:
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > my-upload-key.jks
 
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
       - name: Build release APK
         shell: bash
         env:
