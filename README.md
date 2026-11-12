@@ -17,6 +17,8 @@ More soon, it takes time to fine tune models.
 - (Soon) [Ai Horde](https://aihorde.net) - Use AI Horde models and image generation, usually faster and higher quality models.
 
 ## Upcoming Features (in order of priority)
+- Better update system + changelogs
+- Settings
 - Speech To Text (STT)
 - Text To Speech (TTS)
 - Image generation
