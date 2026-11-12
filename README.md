@@ -17,8 +17,8 @@ More soon, it takes time to fine tune models.
 - (Soon) [Ai Horde](https://aihorde.net) - Use AI Horde models and image generation, usually faster and higher quality models.
 
 ## Upcoming Features (in order of priority)
-- Characters and Universes, create characters and universes for roleplaying.
 - Speech To Text (STT)
 - Text To Speech (TTS)
 - Image generation
 - More models (primarily fine tuned ones)
+- Characters and Universes, create characters and universes for roleplaying.
