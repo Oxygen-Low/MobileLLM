@@ -340,9 +340,17 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(messages, key = { it.id }) { message ->
+                        val isLastMessage = message.id == messages.lastOrNull()?.id
                         ChatMessageItem(
                             message = message,
-                            modelName = currentModel.shortName
+                            modelName = currentModel.shortName,
+                            // Rewind rolls back to an earlier response; regenerate
+                            // re-runs the prompt behind the final response. Both are
+                            // hidden while a reply is being streamed.
+                            showRewind = !isGenerating && message.role == "assistant" && !isLastMessage,
+                            showRegenerate = !isGenerating && message.role == "assistant" && isLastMessage,
+                            onRewind = { viewModel.rewindToMessage(message.id) },
+                            onRegenerate = { viewModel.regenerateLastResponse() }
                         )
                     }
 

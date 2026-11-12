@@ -530,6 +530,64 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isGenerating.value = false
     }
 
+    /**
+     * Re-runs the most recent user prompt and replaces the final assistant reply
+     * with a freshly generated one. No-op unless the transcript ends with an
+     * assistant response that has a user prompt before it.
+     */
+    fun regenerateLastResponse() {
+        if (_isGenerating.value) return
+
+        val model = selectedModel.value
+        if (!model.isReadyToLoad) return
+
+        val sessionId = _currentSessionId.value ?: return
+        onUserActivity()
+
+        viewModelScope.launch {
+            val transcript = repository.getMessagesForSession(sessionId).first()
+            val lastIndex = transcript.lastIndex
+            val lastMessage = transcript.getOrNull(lastIndex) ?: return@launch
+            if (lastMessage.role != "assistant") return@launch
+
+            val lastUserIndex = (lastIndex - 1 downTo 0)
+                .indexOfFirst { transcript[it].role == "user" }
+            if (lastUserIndex < 0) return@launch
+
+            // Drop the reply and its prompt; executePromptStream re-inserts the
+            // prompt as a fresh user turn before generating the new reply.
+            repository.deleteMessagesByIds(
+                listOf(transcript[lastUserIndex].id, lastMessage.id)
+            )
+
+            if (modelEngineManager.loadState.value != ModelLoadState.LOADED) {
+                val file = downloadManager.getModelFile(model.id)
+                modelEngineManager.loadModel(model, file)
+            }
+            executePromptStream(transcript[lastUserIndex].content, model)
+        }
+    }
+
+    /**
+     * Rolls the transcript back to the given assistant response by deleting
+     * every message that came after it.
+     */
+    fun rewindToMessage(messageId: String) {
+        if (_isGenerating.value) return
+
+        val sessionId = _currentSessionId.value ?: return
+
+        viewModelScope.launch {
+            val transcript = repository.getMessagesForSession(sessionId).first()
+            val index = transcript.indexOfFirst { it.id == messageId }
+            if (index < 0 || index == transcript.lastIndex) return@launch
+
+            repository.deleteMessagesByIds(
+                transcript.drop(index + 1).map { it.id }
+            )
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         onAppStop()

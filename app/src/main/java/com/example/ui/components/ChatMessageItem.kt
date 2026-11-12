@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.VolumeUp
@@ -80,7 +82,11 @@ fun ChatMessageItem(
     message: ChatMessageEntity,
     modelName: String,
     isStreaming: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showRewind: Boolean = false,
+    showRegenerate: Boolean = false,
+    onRewind: () -> Unit = {},
+    onRegenerate: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isUser = message.role == "user"
@@ -194,8 +200,40 @@ fun ChatMessageItem(
                                 }
                             }
 
-                            // Right: Minimal action icons (Copy)
+                            // Right: Minimal action icons (Rewind, Regenerate, Copy)
                             Row(verticalAlignment = Alignment.CenterVertically) {
+
+                                if (showRewind) {
+                                    IconButton(
+                                        onClick = onRewind,
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .testTag("rewind_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Undo,
+                                            contentDescription = "Rewind to this message",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+
+                                if (showRegenerate) {
+                                    IconButton(
+                                        onClick = onRegenerate,
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .testTag("regenerate_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Regenerate response",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
 
                                 var copied by remember { mutableStateOf(false) }
                                 IconButton(

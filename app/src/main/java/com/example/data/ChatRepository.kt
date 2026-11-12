@@ -22,6 +22,12 @@ class ChatRepository(private val chatDao: ChatDao) {
         chatDao.deleteSessionById(sessionId)
     }
 
+    suspend fun deleteMessagesByIds(messageIds: List<String>) {
+        if (messageIds.isNotEmpty()) {
+            chatDao.deleteMessagesByIds(messageIds)
+        }
+    }
+
     suspend fun insertMessage(message: ChatMessageEntity) {
         chatDao.insertMessage(message)
     }
