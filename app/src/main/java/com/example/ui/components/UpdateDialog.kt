@@ -26,13 +26,7 @@ fun UpdateDialog(
             onDismissRequest = onDismiss,
             title = { Text("Update available") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${state.info.versionName} is available (you have V${BuildConfig.VERSION_CODE}).")
-                    val notes = state.info.releaseNotes.trim()
-                    if (notes.isNotEmpty()) {
-                        Text(notes.take(600), style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
-                    }
-                }
+                Text("${state.info.versionName} is available (you have V${BuildConfig.VERSION_CODE}).")
             },
             confirmButton = {
                 TextButton(onClick = onDownload) { Text("Update") }
