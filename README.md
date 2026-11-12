@@ -6,6 +6,8 @@ This means you could run LLMs completely offline if you lose internet access or 
 
 If a LLM is too slow or wont fit in your ram, try switching to a smaller one.
 
+You don't need to do much to update it. It automatically checks for new releases and updates.
+
 Some models were specifically fine tuned for this app:
 
 DeepSmolLM3-3B - SmolLM3-3B fine tuned on Deepseek v4.1 Flash outputs and reasoning.
