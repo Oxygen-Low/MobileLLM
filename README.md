@@ -11,3 +11,6 @@ Some models were specifically fine tuned for this app:
 DeepSmolLM3-3B - SmolLM3-3B fine tuned on Deepseek v4.1 outputs and reasoning.
 
 More soon, it takes time to fine tune models.
+
+## Integrations
+(Soon) [Oxygen Low's Software](https://oxygenlow.com) - Characters, universes, etc importing
