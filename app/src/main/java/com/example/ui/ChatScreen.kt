@@ -91,7 +91,6 @@ fun ChatScreen(
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
-    val searchEnabled by viewModel.searchEnabled.collectAsStateWithLifecycle()
     val reasoningLevel by viewModel.reasoningLevel.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
 
@@ -172,11 +171,9 @@ fun ChatScreen(
         bottomBar = {
             ChatInputBar(
                 isGenerating = isGenerating,
-                searchEnabled = searchEnabled,
                 modelName = currentModel.shortName,
                 reasoningLevel = reasoningLevel,
                 reasoningSupported = currentModel.supportsReasoning,
-                onToggleSearch = { viewModel.toggleSearch(it) },
                 onSelectReasoningLevel = { viewModel.setReasoningLevel(it) },
                 onSendMessage = { viewModel.sendMessage(it) },
                 onStopGenerating = { viewModel.stopGeneration() }

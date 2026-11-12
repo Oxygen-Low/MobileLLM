@@ -20,12 +20,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,11 +56,9 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun ChatInputBar(
     isGenerating: Boolean,
-    searchEnabled: Boolean,
     modelName: String,
     reasoningLevel: ReasoningLevel,
     reasoningSupported: Boolean,
-    onToggleSearch: (Boolean) -> Unit,
     onSelectReasoningLevel: (ReasoningLevel) -> Unit,
     onSendMessage: (String) -> Unit,
     onStopGenerating: () -> Unit,
@@ -73,8 +66,6 @@ fun ChatInputBar(
 ) {
     var text by remember { mutableStateOf("") }
     val canSend = text.isNotBlank() && !isGenerating
-
-    var plusMenuExpanded by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier
@@ -143,7 +134,9 @@ fun ChatInputBar(
                 }
             }
 
-            // Modern Floating Input Container with [+] Tools Menu, TextField & Send/Stop Button
+            // Modern Floating Input Container with TextField & Send/Stop Button.
+            // Web search is always available to the model, so there is no
+            // tools toggle next to the input anymore.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -151,86 +144,12 @@ fun ChatInputBar(
                     .background(SurfaceElevated)
                     .border(
                         1.dp,
-                        if (searchEnabled) ReasoningAmber.copy(alpha = 0.6f) else BorderSubtle,
+                        BorderSubtle,
                         RoundedCornerShape(26.dp)
                     )
-                    .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                    .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // [+] Menu Button for Tools & Features (DuckDuckGo Web Search)
-                Box {
-                    IconButton(
-                        onClick = { plusMenuExpanded = true },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (searchEnabled) GptEmerald.copy(alpha = 0.2f) else SurfaceDark.copy(alpha = 0.6f))
-                            .testTag("plus_menu_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Tools and Search Menu",
-                            tint = if (searchEnabled) GptEmerald else TextPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = plusMenuExpanded,
-                        onDismissRequest = { plusMenuExpanded = false },
-                        modifier = Modifier
-                            .background(SurfaceElevated)
-                            .border(0.5.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "DuckDuckGo Web Search",
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = TextPrimary
-                                            )
-                                        )
-                                        if (searchEnabled) {
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = "Enabled",
-                                                tint = GptEmerald,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = if (searchEnabled) "Active: queries injected with system date" else "Disabled: on-device model only",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = if (searchEnabled) GptEmerald else TextMuted,
-                                            fontSize = 11.sp
-                                        )
-                                    )
-                                }
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = null,
-                                    tint = if (searchEnabled) GptEmerald else TextSecondary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            },
-                            onClick = {
-                                onToggleSearch(!searchEnabled)
-                                plusMenuExpanded = false
-                            },
-                            modifier = Modifier.testTag("web_search_toggle")
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
                 BasicTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -259,7 +178,7 @@ fun ChatInputBar(
                         ) {
                             if (text.isEmpty()) {
                                 Text(
-                                    text = if (searchEnabled) "Search web & message $modelName…" else "Message $modelName…",
+                                    text = "Message $modelName…",
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         color = TextMuted,
                                         fontSize = 14.5.sp

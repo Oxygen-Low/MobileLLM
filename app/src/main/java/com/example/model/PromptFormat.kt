@@ -113,14 +113,22 @@ object PromptFormat {
         }
 
         for (turn in turns) {
-            if (turn.role == "assistant") {
-                prompt.append("<|im_start|>assistant\n")
-                    .append(turn.content.trimStart('\n'))
-                    .append("<|im_end|>\n")
-            } else {
-                prompt.append("<|im_start|>user\n")
-                    .append(turn.content)
-                    .append("<|im_end|>\n")
+            when (turn.role) {
+                "assistant" -> {
+                    prompt.append("<|im_start|>assistant\n")
+                        .append(turn.content.trimStart('\n'))
+                        .append("<|im_end|>\n")
+                }
+                "tool" -> {
+                    prompt.append("<|im_start|>tool\n")
+                        .append(turn.content.trim())
+                        .append("<|im_end|>\n")
+                }
+                else -> {
+                    prompt.append("<|im_start|>user\n")
+                        .append(turn.content)
+                        .append("<|im_end|>\n")
+                }
             }
         }
 
@@ -171,14 +179,22 @@ object PromptFormat {
         }
 
         for (turn in turns) {
-            if (turn.role == "assistant") {
-                prompt.append("<|im_start|>assistant\n")
-                    .append(turn.content.trimStart('\n'))
-                    .append("<|im_end|>\n")
-            } else {
-                prompt.append("<|im_start|>user\n")
-                    .append(turn.content)
-                    .append("<|im_end|>\n")
+            when (turn.role) {
+                "assistant" -> {
+                    prompt.append("<|im_start|>assistant\n")
+                        .append(turn.content.trimStart('\n'))
+                        .append("<|im_end|>\n")
+                }
+                "tool" -> {
+                    prompt.append("<|im_start|>tool\n")
+                        .append(turn.content.trim())
+                        .append("<|im_end|>\n")
+                }
+                else -> {
+                    prompt.append("<|im_start|>user\n")
+                        .append(turn.content)
+                        .append("<|im_end|>\n")
+                }
             }
         }
 

@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fullscreen
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.VolumeUp
@@ -133,9 +136,10 @@ fun ChatMessageItem(
                     .fillMaxWidth()
                     .testTag("assistant_message_${message.id}")
             ) {
-                // Tool Execution Banner (DuckDuckGo Live Search)
+                // Tool Execution Banner (web search, clock, calculator)
                 if (message.isToolExecution || !message.toolQuery.isNullOrEmpty()) {
                     ModernToolExecutionBanner(
+                        toolName = message.toolName,
                         query = message.toolQuery ?: "",
                         sourceUrl = message.toolSourceUrl
                     )
@@ -378,11 +382,26 @@ private fun RichMessageContent(content: String) {
 
 @Composable
 fun ModernToolExecutionBanner(
+    toolName: String?,
     query: String,
     sourceUrl: String?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    val label = when (toolName) {
+        "duckduckgo_search" -> "DuckDuckGo Search"
+        "get_current_datetime" -> "Device Clock"
+        "calculate_expression" -> "Calculator"
+        null -> "Tool"
+        else -> toolName
+    }
+    val icon = when (toolName) {
+        "duckduckgo_search" -> Icons.Default.Language
+        "get_current_datetime" -> Icons.Default.Schedule
+        "calculate_expression" -> Icons.Default.Calculate
+        else -> Icons.Default.Build
+    }
 
     Surface(
         modifier = modifier
@@ -411,15 +430,15 @@ fun ModernToolExecutionBanner(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Default.Language,
-                    contentDescription = "DuckDuckGo Search",
+                    imageVector = icon,
+                    contentDescription = label,
                     tint = ReasoningAmber,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
                     Text(
-                        text = "DuckDuckGo Search",
+                        text = label,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = ReasoningAmber,

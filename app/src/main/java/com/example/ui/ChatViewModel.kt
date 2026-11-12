@@ -72,9 +72,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
-    private val _searchEnabled = MutableStateFlow(false)
-    val searchEnabled: StateFlow<Boolean> = _searchEnabled.asStateFlow()
-
     private val _reasoningLevel = MutableStateFlow(ReasoningLevel.DEFAULT)
     val reasoningLevel: StateFlow<ReasoningLevel> = _reasoningLevel.asStateFlow()
 
@@ -306,10 +303,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         updateManager.dismiss()
     }
 
-    fun toggleSearch(enabled: Boolean) {
-        _searchEnabled.value = enabled
-    }
-
     fun setReasoningLevel(level: ReasoningLevel) {
         _reasoningLevel.value = level
     }
@@ -427,7 +420,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 modelEngineManager.generateStream(
                     prompt = promptText,
-                    searchEnabled = _searchEnabled.value,
                     systemDate = currentDate,
                     history = history,
                     enableThinking = reasoningLevel.usesThinking,
@@ -435,6 +427,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ).collect { event ->
                     when (event) {
                         is GenerationEvent.ToolExecuting -> {
+                            // The model switched to a tool: the reasoning and
+                            // answer of this round are replaced by the next
+                            // round, which reasons over the tool result.
+                            streamingReasoning.value = ""
+                            streamingContent.value = ""
                             activeToolName.value = event.toolName
                             activeToolQuery.value = event.argument
                         }
