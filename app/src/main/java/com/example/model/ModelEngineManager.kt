@@ -468,9 +468,10 @@ class ModelEngineManager(
 
         builder.append("\n\nWhen you need a tool, output exactly one tool call in this format and nothing else (after your reasoning, if reasoning is enabled):")
         builder.append("\n<tool_call>")
-        builder.append("\ntool_name: argument")
+        builder.append("\nduckduckgo_search: latest news")
         builder.append("\n</tool_call>")
-        builder.append("\nUse one of the tool names listed above. If a tool has no parameter, write only its name followed by a colon.")
+        builder.append("\nReplace the tool name with one of the names listed above and the text after the colon with the argument that tool needs.")
+        builder.append("\nIf a tool has no parameter, write only its name followed by a colon.")
         builder.append("\nAfter the tool result arrives, reason about it and then either call another tool or answer the user.")
         builder.append("\nCall a tool whenever the answer depends on live information, the current date or time, or arithmetic.")
         return builder.toString()
