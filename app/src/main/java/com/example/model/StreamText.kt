@@ -1,6 +1,7 @@
 package com.example.model
 
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 
 /**
  * Decodes a token stream into text without splitting multi-byte UTF-8
@@ -123,10 +124,9 @@ internal class ToolCallDetector(knownTools: Set<String>) {
                 // A `</think>` injected by the reasoning budget can land in
                 // the middle of a call; drop it before parsing the body.
                 val cleaned = body.replace("<think>", "").replace("</think>", "")
-                val call = ToolCallParser.parse(cleaned)
-                val canonical = call?.let { resolveToolName(it.toolName) }
-                if (call != null && canonical != null) {
-                    parsed = ParsedToolCall(canonical, call.argument)
+                val call = ToolCallParser.parse(cleaned, knownTools)
+                if (call != null) {
+                    parsed = call
                     break
                 }
                 // Not a real call (the model was quoting the syntax, or named a
@@ -138,10 +138,6 @@ internal class ToolCallDetector(knownTools: Set<String>) {
         return out.toString()
     }
 
-    /** Maps a (possibly mis-cased) tool name onto the canonical one. */
-    private fun resolveToolName(name: String): String? =
-        knownTools.firstOrNull { it.equals(name, ignoreCase = true) }
-
     private companion object {
         const val OPEN = "<tool_call>"
         const val CLOSE = "</tool_call>"
@@ -151,44 +147,134 @@ internal class ToolCallDetector(knownTools: Set<String>) {
 /**
  * Parses the body of a `<tool_call>` block.
  *
- * Two shapes are accepted: the simple `tool_name: argument` form the system
- * prompt asks for, and a JSON object for models that prefer to emit one.
+ * Small models are not consistent about the shape of a tool call, so several
+ * spellings are accepted:
+ *
+ * ```
+ * duckduckgo_search: latest news
+ * tool_name: duckduckgo_search
+ * _argument: latest news
+ * {"name": "duckduckgo_search", "arguments": {"query": "latest news"}}
+ * ```
+ *
+ * The tool name is always matched against [knownTools], so a block that only
+ * mentions the syntax (or invents a tool) is not executed.
  */
 internal object ToolCallParser {
 
-    fun parse(body: String): ToolCallDetector.ParsedToolCall? {
+    /** Keys that introduce the tool name. */
+    private val NAME_KEYS = setOf(
+        "tool_name", "toolname", "tool", "name", "function", "func"
+    )
+
+    /** Keys that introduce the argument. */
+    private val ARGUMENT_KEYS = setOf(
+        "argument", "arguments", "arg", "args", "query", "expression",
+        "input", "params", "parameters", "value"
+    )
+
+    fun parse(body: String, knownTools: Set<String>): ToolCallDetector.ParsedToolCall? {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) return null
 
         if (trimmed.startsWith("{")) {
-            parseJson(trimmed)?.let { return it }
+            parseJson(trimmed, knownTools)?.let { return it }
         }
 
-        val colon = trimmed.indexOf(':')
-        if (colon > 0) {
-            val name = trimmed.substring(0, colon).trim().stripQuotes()
-            val argument = trimmed.substring(colon + 1).trim().stripQuotes()
-            return if (name.isEmpty()) null
-            else ToolCallDetector.ParsedToolCall(name, argument)
+        val lines = trimmed.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+        var labelledName: String? = null
+        var labelledArgument: String? = null
+        var inlineName: String? = null
+        var inlineArgument: String? = null
+        var bareName: String? = null
+
+        for ((index, line) in lines.withIndex()) {
+            val separator = line.indexOfFirst { it == ':' || it == '=' }
+            if (separator <= 0) {
+                if (index == 0 && !line.contains(' ')) bareName = line
+                continue
+            }
+            val key = normalizeKey(line.substring(0, separator))
+            val value = line.substring(separator + 1).trim().stripQuotes()
+            when {
+                key in NAME_KEYS && labelledName == null -> labelledName = value
+                key in ARGUMENT_KEYS && labelledArgument == null -> labelledArgument = value
+                inlineName == null && bareName == null -> {
+                    inlineName = line.substring(0, separator).trim()
+                    inlineArgument = value
+                }
+            }
         }
 
-        // A bare tool name (no parameter).
-        val name = trimmed.lineSequence().firstOrNull()?.trim().orEmpty()
-        return if (name.isNotEmpty() && !name.contains(' ')) {
-            ToolCallDetector.ParsedToolCall(name.stripQuotes(), "")
-        } else {
-            null
+        // A labelled name: "tool_name: duckduckgo_search".
+        labelledName?.let { name ->
+            canonicalName(name, knownTools)?.let { canonical ->
+                return ToolCallDetector.ParsedToolCall(canonical, labelledArgument.orEmpty())
+            }
         }
+
+        // An inline name: "duckduckgo_search: latest news".
+        inlineName?.let { name ->
+            canonicalName(name, knownTools)?.let { canonical ->
+                val argument = labelledArgument ?: inlineArgument.orEmpty()
+                return ToolCallDetector.ParsedToolCall(canonical, argument)
+            }
+        }
+
+        // A bare name, with the argument on the following lines.
+        bareName?.let { name ->
+            canonicalName(name, knownTools)?.let { canonical ->
+                val rest = lines.drop(1).joinToString(" ").trim().stripQuotes()
+                return ToolCallDetector.ParsedToolCall(canonical, labelledArgument ?: rest)
+            }
+        }
+
+        // The tool is named somewhere inside the block.
+        val lower = trimmed.lowercase(Locale.US)
+        for (tool in knownTools) {
+            val index = lower.indexOf(tool.lowercase(Locale.US))
+            if (index < 0) continue
+            val after = trimmed.substring(index + tool.length)
+                .trimStart(' ', ':', '=', '(', '"', '\'')
+                .trim()
+            val argument = labelledArgument
+                ?: after.lineSequence().firstOrNull()?.trim().orEmpty().stripQuotes()
+            return ToolCallDetector.ParsedToolCall(tool, argument)
+        }
+
+        return null
     }
 
-    private fun parseJson(text: String): ToolCallDetector.ParsedToolCall? {
-        val name = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"").find(text)?.groupValues?.get(1)
-            ?: return null
-        if (name.isEmpty()) return null
-        val argument = Regex("\"(?:arguments?|query|expression)\"\\s*:\\s*\"([^\"]*)\"")
+    private fun parseJson(
+        text: String,
+        knownTools: Set<String>
+    ): ToolCallDetector.ParsedToolCall? {
+        val name = Regex("\"(?:name|tool)\"\\s*:\\s*\"([^\"]*)\"").find(text)
+            ?.groupValues?.get(1) ?: return null
+        val canonical = canonicalName(name, knownTools) ?: return null
+        val argument = Regex("\"(?:arguments?|query|expression|input)\"\\s*:\\s*\"([^\"]*)\"")
             .find(text)?.groupValues?.get(1).orEmpty()
-        return ToolCallDetector.ParsedToolCall(name, argument.stripQuotes())
+        return ToolCallDetector.ParsedToolCall(canonical, argument.stripQuotes())
     }
+
+    /** Matches a (possibly mis-cased or mis-dashed) name against the tools. */
+    private fun canonicalName(name: String, knownTools: Set<String>): String? {
+        val normalized = normalizeToolName(name)
+        if (normalized.isEmpty()) return null
+        return knownTools.firstOrNull { normalizeToolName(it) == normalized }
+    }
+
+    private fun normalizeToolName(name: String): String =
+        name.trim().lowercase(Locale.US).replace('-', '_')
+
+    /** Reduces a key to its bare name: "_argument" and "Argument" both work. */
+    private fun normalizeKey(key: String): String =
+        key.trim()
+            .lowercase(Locale.US)
+            .replace('-', '_')
+            .trimStart { !it.isLetterOrDigit() }
+            .replace(Regex("[^a-z0-9_]"), "")
 
     private fun String.stripQuotes(): String =
         trim().removeSurrounding("\"").removeSurrounding("'")
