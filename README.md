@@ -13,4 +13,12 @@ DeepSmolLM3-3B - SmolLM3-3B fine tuned on Deepseek v4.1 Flash outputs and reason
 More soon, it takes time to fine tune models.
 
 ## Integrations
-(Soon) [Oxygen Low's Software](https://oxygenlow.com) - Characters, universes, etc importing
+- (Soon) [Oxygen Low's Software](https://oxygenlow.com) - Characters, universes, etc importing.
+- (Soon) [Ai Horde](https://aihorde.net) - Use AI Horde models and image generation, usually faster and higher quality models.
+
+## Upcoming Features (in order of priority)
+- Characters and Universes, create characters and universes for roleplaying.
+- Speech To Text (STT)
+- Text To Speech (TTS)
+- Image generation
+- More models (primarily fine tuned ones)
