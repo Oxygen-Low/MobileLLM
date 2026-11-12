@@ -22,3 +22,4 @@ debug.keystore
 .tmp
 build-log.txt
 test-log.txt
+/dist

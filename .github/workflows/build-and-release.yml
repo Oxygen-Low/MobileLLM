@@ -1,0 +1,112 @@
+name: Build and Release APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize releases so two pushes cannot pick the same version number.
+concurrency:
+  group: build-and-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(git tag -l 'V[0-9]*' \
+            | sed -E 's/^V([0-9]+)$/\1/' \
+            | grep -E '^[0-9]+$' \
+            | sort -n \
+            | tail -n 1 || true)"
+          next=$(( ${latest:-0} + 1 ))
+          echo "code=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=V$next" >> "$GITHUB_OUTPUT"
+          echo "Building V$next (versionCode $next)"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platforms;android-36.1" \
+            "build-tools;36.0.0" \
+            "ndk;27.3.13750724" \
+            "cmake;3.22.1"
+
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error title=Missing signing key::Add KEYSTORE_BASE64, STORE_PASSWORD and KEY_PASSWORD repository secrets (optionally KEY_ALIAS)."
+            exit 1
+          fi
+          if [ -z "${STORE_PASSWORD:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error title=Missing signing passwords::Add STORE_PASSWORD and KEY_PASSWORD repository secrets."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > my-upload-key.jks
+
+      - name: Build release APK
+        shell: bash
+        env:
+          APP_VERSION_CODE: ${{ steps.version.outputs.code }}
+          APP_VERSION_NAME: ${{ steps.version.outputs.code }}
+          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          apk="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          cp "$apk" dist/MobileLLM.apk
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" dist/MobileLLM.apk \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes "Automated build of $TAG (version code $VERSION_CODE)."

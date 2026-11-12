@@ -61,6 +61,7 @@ import com.example.ui.components.ChatMessageItem
 import com.example.ui.components.ModelsHubSheet
 import com.example.ui.components.SessionDrawerSheet
 import com.example.ui.components.TopTelemetryBar
+import com.example.ui.components.UpdateDialog
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
@@ -91,6 +92,7 @@ fun ChatScreen(
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val searchEnabled by viewModel.searchEnabled.collectAsStateWithLifecycle()
     val reasoningLevel by viewModel.reasoningLevel.collectAsStateWithLifecycle()
+    val updateState by viewModel.updateState.collectAsStateWithLifecycle()
 
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
@@ -377,5 +379,13 @@ fun ChatScreen(
         onNewChat = { viewModel.createNewSession() },
         onDeleteSession = { viewModel.deleteSession(it) },
         onClearAllSessions = { viewModel.clearAllSessions() }
+    )
+
+    // App update prompt (checks on start and every 60 seconds while foregrounded)
+    UpdateDialog(
+        state = updateState,
+        onDownload = { viewModel.downloadAndInstallUpdate() },
+        onInstall = { viewModel.installUpdate() },
+        onDismiss = { viewModel.dismissUpdate() }
     )
 }

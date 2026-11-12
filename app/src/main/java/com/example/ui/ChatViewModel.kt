@@ -17,8 +17,10 @@ import com.example.model.ModelProfile
 import com.example.model.PromptFormat
 import com.example.model.ReasoningLevel
 import com.example.tools.MCPToolExecutor
+import com.example.update.UpdateManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +40,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val mcpToolExecutor = MCPToolExecutor()
     val modelEngineManager = ModelEngineManager(mcpToolExecutor)
     val downloadManager = ModelDownloadManager(application)
+    val updateManager = UpdateManager(application)
+
+    val updateState = updateManager.state
 
     val availableModels = MutableStateFlow(ModelProfile.DEFAULT_MODELS)
     val selectedModel = MutableStateFlow(ModelProfile.DEEP_SMOLLM3)
@@ -85,6 +90,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var generationJob: Job? = null
     private var inactivityJob: Job? = null
+    private var updateCheckJob: Job? = null
     private var lastActivityResetMs = 0L
 
     init {
@@ -249,6 +255,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppStart() {
+        startUpdateChecks()
         viewModelScope.launch {
             if (selectedModel.value.isReadyToLoad && modelEngineManager.loadState.value != ModelLoadState.LOADED) {
                 val file = downloadManager.getModelFile(selectedModel.value.id)
@@ -258,11 +265,45 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppStop() {
+        stopUpdateChecks()
         inactivityJob?.cancel()
         inactivityJob = null
         viewModelScope.launch {
             modelEngineManager.unloadModel()
         }
+    }
+
+    /**
+     * Checks for a newer GitHub release immediately and then once per minute
+     * while the app is in the foreground.
+     */
+    private fun startUpdateChecks() {
+        if (updateCheckJob?.isActive == true) return
+        updateCheckJob = viewModelScope.launch {
+            while (isActive) {
+                updateManager.checkForUpdates()
+                delay(UPDATE_CHECK_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopUpdateChecks() {
+        updateCheckJob?.cancel()
+        updateCheckJob = null
+    }
+
+    fun downloadAndInstallUpdate() {
+        viewModelScope.launch {
+            updateManager.downloadAndInstall()
+        }
+    }
+
+    fun installUpdate() {
+        updateManager.install()
+    }
+
+    fun dismissUpdate() {
+        updateManager.dismiss()
     }
 
     fun toggleSearch(enabled: Boolean) {
@@ -501,5 +542,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         const val INACTIVITY_TIMEOUT_MS = 30_000L
         const val ACTIVITY_RESET_THROTTLE_MS = 500L
+        const val UPDATE_CHECK_INTERVAL_MS = 60_000L
     }
 }

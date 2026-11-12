@@ -8,6 +8,15 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// Version values are supplied by the release workflow. Local builds fall back to
+// version 1 so the project still assembles without any extra configuration.
+val appVersionCode = (providers.gradleProperty("appVersionCode").orNull
+  ?: System.getenv("APP_VERSION_CODE")
+  ?: "1").toInt()
+val appVersionName = providers.gradleProperty("appVersionName").orNull
+  ?: System.getenv("APP_VERSION_NAME")
+  ?: appVersionCode.toString()
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -24,8 +33,8 @@ android {
     applicationId = "com.aistudio.pocketlm.krfxwq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = appVersionCode
+    versionName = appVersionName
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -55,7 +64,7 @@ android {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
+      keyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
