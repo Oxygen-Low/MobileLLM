@@ -117,7 +117,8 @@ fun ChatScreen(
     val downloadInfo = downloadStates[currentModel.id]
     val isCurrentDownloaded = currentModel.downloadState == ModelDownloadState.DOWNLOADED ||
             downloadInfo?.state == ModelDownloadState.DOWNLOADED
-    val isCurrentDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
+    val currentDownload = downloadInfo?.takeIf { it.state == ModelDownloadState.DOWNLOADING }
+    val isCurrentDownloading = currentDownload != null
 
     // New message (user send or finalized reply): glide to the bottom. A message
     // the user just sent always pulls the view down; otherwise only follow when
@@ -267,10 +268,10 @@ fun ChatScreen(
                             }
 
                             // Live Download Progress Bar
-                            if (isCurrentDownloading && downloadInfo != null) {
+                            if (currentDownload != null) {
                                 Spacer(modifier = Modifier.height(10.dp))
                                 LinearProgressIndicator(
-                                    progress = { downloadInfo.progress },
+                                    progress = { currentDownload.progress },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(6.dp)
@@ -284,7 +285,7 @@ fun ChatScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "${(downloadInfo.progress * 100).toInt()}% • ${downloadInfo.downloadedMb.toInt()} / ${downloadInfo.totalMb.toInt()} MB",
+                                        text = "${(currentDownload.progress * 100).toInt()}% • ${currentDownload.downloadedMb.toInt()} / ${currentDownload.totalMb.toInt()} MB",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontFamily = FontFamily.Monospace,
                                             color = TelemetryCyan,
@@ -292,7 +293,7 @@ fun ChatScreen(
                                         )
                                     )
                                     Text(
-                                        text = "${downloadInfo.speedMbps} MB/s",
+                                        text = "${currentDownload.speedMbps} MB/s",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontFamily = FontFamily.Monospace,
                                             color = TerminalGreen,
