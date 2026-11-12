@@ -18,10 +18,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.DownloadProgressInfo
 import com.example.model.ModelDownloadState
+import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
@@ -68,8 +69,10 @@ fun ModelsHubSheet(
     onDismiss: () -> Unit,
     models: List<ModelProfile>,
     currentModel: ModelProfile,
+    loadState: ModelLoadState,
     downloadStates: Map<String, DownloadProgressInfo>,
     onSelectAndLoadModel: (ModelProfile) -> Unit,
+    onUnloadModel: () -> Unit,
     onDownloadModel: (ModelProfile) -> Unit,
     onReinstallModel: (ModelProfile) -> Unit,
     onDeleteModel: (String) -> Unit,
@@ -169,10 +172,16 @@ fun ModelsHubSheet(
                             downloadInfo?.state == ModelDownloadState.DOWNLOADED
                     val isDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
                     val isCurrentActive = model.id == currentModel.id
+                    val isLoaded = isCurrentActive && loadState == ModelLoadState.LOADED
+                    val isLoading = isCurrentActive && loadState == ModelLoadState.LOADING
+                    val isUnloading = isCurrentActive && loadState == ModelLoadState.UNLOADING
 
                     ModelCard(
                         model = model,
                         isActive = isCurrentActive,
+                        isLoaded = isLoaded,
+                        isLoading = isLoading,
+                        isUnloading = isUnloading,
                         isDownloaded = isDownloaded,
                         isDownloading = isDownloading,
                         downloadInfo = downloadInfo,
@@ -180,6 +189,7 @@ fun ModelsHubSheet(
                             onSelectAndLoadModel(model)
                             onDismiss()
                         },
+                        onUnload = onUnloadModel,
                         onDownload = { onDownloadModel(model) },
                         onReinstall = { onReinstallModel(model) },
                         onDelete = { onDeleteModel(model.id) }
@@ -194,10 +204,14 @@ fun ModelsHubSheet(
 private fun ModelCard(
     model: ModelProfile,
     isActive: Boolean,
+    isLoaded: Boolean,
+    isLoading: Boolean,
+    isUnloading: Boolean,
     isDownloaded: Boolean,
     isDownloading: Boolean,
     downloadInfo: DownloadProgressInfo?,
     onSelectAndLoad: () -> Unit,
+    onUnload: () -> Unit,
     onDownload: () -> Unit,
     onReinstall: () -> Unit,
     onDelete: () -> Unit
@@ -233,7 +247,7 @@ private fun ModelCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (isActive) {
+                        if (isLoaded) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
@@ -337,22 +351,55 @@ private fun ModelCard(
             ) {
                 if (isDownloaded) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Button(
-                            onClick = onSelectAndLoad,
-                            enabled = !isActive,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isActive) BorderSubtle else TelemetryCyan,
-                                disabledContainerColor = BorderSubtle
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (isActive) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        if (isLoaded) {
+                            OutlinedButton(
+                                onClick = onUnload,
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("unload_${model.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PowerSettingsNew,
+                                    contentDescription = null,
+                                    tint = ErrorRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Loaded in Memory", color = TextSecondary, fontSize = 12.sp)
-                            } else {
-                                Text("Load into Memory", color = SurfaceDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(
+                                    "Unload from Memory",
+                                    color = ErrorRed,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = onSelectAndLoad,
+                                enabled = !isActive && !isLoading && !isUnloading,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isActive) BorderSubtle else TelemetryCyan,
+                                    disabledContainerColor = BorderSubtle
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (isLoading || isUnloading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = TelemetryCyan
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        if (isLoading) "Loading into Memory…" else "Unloading…",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                } else {
+                                    Text("Load into Memory", color = SurfaceDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
                             }
                         }
 

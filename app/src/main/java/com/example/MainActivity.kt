@@ -31,7 +31,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (isFinishing) {
+        // Moving the task to the background releases the weights so the device
+        // stops holding the model in RAM (and burns no battery while idle).
+        // Configuration changes keep the screen in the foreground, so skip them.
+        if (!isChangingConfigurations) {
             viewModel.onAppStop()
         }
     }

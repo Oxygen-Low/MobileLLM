@@ -45,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -122,6 +124,15 @@ fun ChatScreen(
             .windowInsetsPadding(WindowInsets.statusBars)
             .windowInsetsPadding(WindowInsets.navigationBars)
             .windowInsetsPadding(WindowInsets.ime)
+            // Any touch/scroll counts as user activity and restarts the idle timer.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(PointerEventPass.Initial)
+                        viewModel.onUserActivity()
+                    }
+                }
+            }
             .testTag("chat_screen"),
         containerColor = BgDark,
         topBar = {
@@ -347,8 +358,10 @@ fun ChatScreen(
         onDismiss = { isModelsHubOpen = false },
         models = availableModels,
         currentModel = currentModel,
+        loadState = loadState,
         downloadStates = downloadStates,
         onSelectAndLoadModel = { viewModel.loadModel(it) },
+        onUnloadModel = { viewModel.unloadModel() },
         onDownloadModel = { viewModel.downloadModel(it) },
         onReinstallModel = { viewModel.reinstallModel(it) },
         onDeleteModel = { viewModel.deleteDownloadedModel(it) }

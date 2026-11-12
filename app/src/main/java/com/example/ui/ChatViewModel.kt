@@ -18,10 +18,12 @@ import com.example.model.PromptFormat
 import com.example.model.ReasoningLevel
 import com.example.tools.MCPToolExecutor
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -82,10 +84,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingPrompt: String? = null
 
     private var generationJob: Job? = null
+    private var inactivityJob: Job? = null
+    private var lastActivityResetMs = 0L
 
     init {
         // Check if models were already downloaded locally
         checkDownloadedModels()
+
+        // Keep the inactivity timer in sync with the engine: schedule it whenever
+        // weights are resident, cancel it as soon as they are not.
+        viewModelScope.launch {
+            modelEngineManager.loadState.collect { state ->
+                if (state == ModelLoadState.LOADED) {
+                    scheduleInactivityUnload()
+                } else {
+                    inactivityJob?.cancel()
+                    inactivityJob = null
+                }
+            }
+        }
     }
 
     fun checkDownloadedModels() {
@@ -187,6 +204,50 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Releases the native model weights immediately. Any in-flight generation is
+     * cancelled and awaited first so the native handle is not freed underneath it.
+     */
+    fun unloadModel() {
+        viewModelScope.launch {
+            inactivityJob?.cancel()
+            inactivityJob = null
+
+            val running = generationJob
+            if (running != null && running.isActive) {
+                running.cancel()
+                running.join()
+            }
+            _isGenerating.value = false
+            modelEngineManager.unloadModel()
+        }
+    }
+
+    /**
+     * Signals that the user interacted with the UI. Restarts the inactivity
+     * countdown so the model is only released after a genuinely idle period.
+     */
+    fun onUserActivity() {
+        if (modelEngineManager.loadState.value != ModelLoadState.LOADED || _isGenerating.value) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastActivityResetMs < ACTIVITY_RESET_THROTTLE_MS) return
+        lastActivityResetMs = now
+        scheduleInactivityUnload()
+    }
+
+    private fun scheduleInactivityUnload() {
+        if (modelEngineManager.loadState.value != ModelLoadState.LOADED || _isGenerating.value) return
+
+        inactivityJob?.cancel()
+        inactivityJob = viewModelScope.launch {
+            delay(INACTIVITY_TIMEOUT_MS)
+            if (modelEngineManager.loadState.value == ModelLoadState.LOADED && !_isGenerating.value) {
+                modelEngineManager.unloadModel()
+            }
+        }
+    }
+
     fun onAppStart() {
         viewModelScope.launch {
             if (selectedModel.value.isReadyToLoad && modelEngineManager.loadState.value != ModelLoadState.LOADED) {
@@ -197,6 +258,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppStop() {
+        inactivityJob?.cancel()
+        inactivityJob = null
         viewModelScope.launch {
             modelEngineManager.unloadModel()
         }
@@ -245,6 +308,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun sendMessage(promptText: String) {
         if (promptText.isBlank() || _isGenerating.value) return
+        onUserActivity()
 
         val model = selectedModel.value
         // If active model is not downloaded yet, queue prompt and initiate download
@@ -269,6 +333,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun executePromptStream(promptText: String, model: ModelProfile) {
         generationJob = viewModelScope.launch {
+            // Generation keeps the device busy; never unload mid-stream.
+            inactivityJob?.cancel()
+            inactivityJob = null
+
             var activeSessionId = _currentSessionId.value
             if (activeSessionId == null) {
                 val newId = UUID.randomUUID().toString()
@@ -380,6 +448,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 activeToolName.value = null
                 activeToolQuery.value = null
                 activeToolSourceUrl.value = null
+
+                // Restart the idle countdown once the engine is free again.
+                if (modelEngineManager.loadState.value == ModelLoadState.LOADED) {
+                    scheduleInactivityUnload()
+                }
             }
         }
     }
@@ -425,5 +498,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_HISTORY_MESSAGES = 10
         const val MAX_HISTORY_CHARS_PER_MESSAGE = 2000
         const val MAX_HISTORY_CHARS_TOTAL = 6000
+
+        const val INACTIVITY_TIMEOUT_MS = 30_000L
+        const val ACTIVITY_RESET_THROTTLE_MS = 500L
     }
 }
