@@ -79,6 +79,22 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
+      - name: Validate signing key
+        shell: bash
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          alias="${KEY_ALIAS:-upload}"
+          keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASSWORD" -alias "$alias" > /dev/null
+          keytool -certreq -keystore my-upload-key.jks -alias "$alias" \
+            -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -file /tmp/signing-check.csr > /dev/null
+          rm -f /tmp/signing-check.csr
+          echo "Signing key and passwords verified."
+
       - name: Build release APK
         shell: bash
         env:
