@@ -74,11 +74,15 @@ class UpdateManager(private val app: Application) {
             else -> Unit
         }
 
-        _state.value = UpdateState.Checking
+        // Only show the transient "checking" state when there is nothing on
+        // screen. Otherwise the once-a-minute poll would hide and re-show the
+        // "update available" / error dialog each time (yes, really).
+        val idleStates = _state.value is UpdateState.Idle || _state.value is UpdateState.UpToDate
+        if (idleStates) _state.value = UpdateState.Checking
 
         val latest = fetchLatestRelease()
         if (latest == null) {
-            _state.value = UpdateState.UpToDate
+            if (idleStates) _state.value = UpdateState.UpToDate
             return
         }
 
@@ -87,7 +91,7 @@ class UpdateManager(private val app: Application) {
         ) {
             pendingUpdate = latest
             _state.value = UpdateState.Available(latest)
-        } else {
+        } else if (idleStates) {
             _state.value = UpdateState.UpToDate
         }
     }
@@ -97,12 +101,21 @@ class UpdateManager(private val app: Application) {
         val info = pendingUpdate ?: return
         if (_state.value is UpdateState.Downloading) return
 
+        // Show progress immediately: this also stops the periodic update check
+        // from starting a second download before the first byte arrives.
+        _state.value = UpdateState.Downloading(0f)
+
         try {
-            val apk = downloadApk(info)
+            // Blocking network + disk I/O must stay off the main thread, or
+            // Android throws NetworkOnMainThreadException (null message) and the
+            // user sees the generic "Update download failed" text.
+            val apk = withContext(Dispatchers.IO) { downloadApk(info) }
             _state.value = UpdateState.ReadyToInstall(info)
             installApk(apk)
         } catch (e: Exception) {
-            _state.value = UpdateState.Error(e.message ?: "Update download failed")
+            _state.value = UpdateState.Error(
+                e.message?.takeIf { it.isNotBlank() } ?: "Update download failed (${e.javaClass.simpleName})"
+            )
         }
     }
 
@@ -227,12 +240,14 @@ class UpdateManager(private val app: Application) {
             .header("User-Agent", USER_AGENT)
             .build()
 
+        var downloadSize = -1L
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 throw IOException("Download failed (HTTP ${response.code})")
             }
             val body = response.body ?: throw IOException("Download returned no data")
             val totalBytes = body.contentLength()
+            downloadSize = totalBytes
             var lastPercent = -1
 
             body.byteStream().use { input ->
@@ -261,6 +276,12 @@ class UpdateManager(private val app: Application) {
 
         if (!destination.exists() || destination.length() == 0L) {
             throw IOException("Downloaded APK is empty")
+        }
+        // Catch truncated transfers before handing a corrupt APK to the installer.
+        val actualBytes = destination.length()
+        if (downloadSize > 0 && actualBytes != downloadSize) {
+            destination.delete()
+            throw IOException("Download incomplete ($actualBytes of $downloadSize bytes)")
         }
         return destination
     }
