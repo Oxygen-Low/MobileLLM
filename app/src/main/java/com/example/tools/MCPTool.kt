@@ -9,11 +9,11 @@ data class MCPTool(
 /**
  * A human readable name for a tool.
  *
- * The model calls tools by their raw name, the UI shows this one - "Used
- * DuckDuckGo Search" reads better than "Used duckduckgo_search".
+ * The model calls tools by their raw name, the UI shows this one - "Used Web
+ * & News Search" reads better than "Used duckduckgo_search".
  */
 fun toolDisplayName(toolName: String?): String = when (toolName) {
-    "duckduckgo_search" -> "DuckDuckGo Search"
+    "duckduckgo_search" -> "Web & News Search"
     "get_current_datetime" -> "Device Clock"
     "calculate_expression" -> "Calculator"
     null -> "Tool"

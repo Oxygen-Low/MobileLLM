@@ -9,6 +9,7 @@ import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class MCPToolExecutor(
@@ -20,7 +21,7 @@ class MCPToolExecutor(
     val availableTools = listOf(
         MCPTool(
             name = "duckduckgo_search",
-            description = "Searches the live web using DuckDuckGo to obtain up-to-date facts, current events, documentation, or links.",
+            description = "Searches the live web for pages and the news wire for headlines, to obtain up-to-date facts, current events, documentation, or links.",
             parametersDescription = "query: string (the search terms to look up)"
         ),
         MCPTool(
@@ -78,109 +79,226 @@ class MCPToolExecutor(
         }
     }
 
+    /**
+     * Searches the web for [query].
+     *
+     * A question about what is happening right now is answered by the news
+     * wire. A plain web search would rank the news channels themselves
+     * first and hand back their marketing copy instead of a headline.
+     */
     suspend fun performDuckDuckGoSearch(query: String): ToolCallResponse {
         return withContext(Dispatchers.IO) {
+            val cleanQuery = query.trim().removeSurrounding("\"").removeSurrounding("'")
             try {
-                val cleanQuery = query.trim().removeSurrounding("\"").removeSurrounding("'")
-                val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
-                
-                // 1. Try DuckDuckGo Instant Answer API
-                val apiUrl = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
-                val apiRequest = Request.Builder()
-                    .url(apiUrl)
-                    .header("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0")
-                    .build()
-
-                val apiResponse = client.newCall(apiRequest).execute()
-                val body = apiResponse.body?.string() ?: ""
-
-                var snippet = ""
-                var sourceUrl: String? = null
-
-                if (body.isNotEmpty() && body.startsWith("{")) {
-                    val json = JSONObject(body)
-                    val abstractText = json.optString("AbstractText", "")
-                    val abstractUrl = json.optString("AbstractURL", "")
-                    val heading = json.optString("Heading", "")
-
-                    if (abstractText.isNotEmpty()) {
-                        snippet = "[$heading] $abstractText"
-                        sourceUrl = abstractUrl.ifEmpty { null }
-                    } else {
-                        val relatedTopics = json.optJSONArray("RelatedTopics")
-                        if (relatedTopics != null && relatedTopics.length() > 0) {
-                            val snippets = mutableListOf<String>()
-                            for (i in 0 until relatedTopics.length().coerceAtMost(3)) {
-                                val item = relatedTopics.optJSONObject(i)
-                                if (item != null) {
-                                    val text = item.optString("Text", "")
-                                    val url = item.optString("FirstURL", "")
-                                    if (text.isNotEmpty()) {
-                                        snippets.add("• $text (Source: $url)")
-                                        if (sourceUrl == null && url.isNotEmpty()) {
-                                            sourceUrl = url
-                                        }
-                                    }
-                                }
-                            }
-                            if (snippets.isNotEmpty()) {
-                                snippet = snippets.joinToString("\n")
-                            }
-                        }
+                if (isNewsQuery(cleanQuery)) {
+                    val headlines = fetchNews(cleanQuery)
+                    if (headlines.isNotEmpty()) {
+                        return@withContext newsResponse(cleanQuery, headlines)
                     }
                 }
 
-                // 2. If API yielded empty abstract (common for specific long-tail queries), query HTML lite
-                if (snippet.isEmpty()) {
-                    val htmlUrl = "https://html.duckduckgo.com/html/?q=$encoded"
-                    val htmlRequest = Request.Builder()
-                        .url(htmlUrl)
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                        .build()
+                fetchInstantAnswer(cleanQuery)?.let { return@withContext it }
 
-                    val htmlResponse = client.newCall(htmlRequest).execute()
-                    val htmlBody = htmlResponse.body?.string() ?: ""
+                fetchWebResults(cleanQuery)?.let { return@withContext it }
 
-                    // Extract snippets and titles with lightweight regex parsing
-                    val snippetRegex = Regex("""<a class="result__snippet[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-                    val urlRegex = Regex("""<a class="result__url"[^>]*href="([^"]*)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-                    
-                    val matches = snippetRegex.findAll(htmlBody).take(3).map {
-                        it.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
-                    }.filter { it.isNotEmpty() }.toList()
-
-                    val firstUrl = urlRegex.find(htmlBody)?.groupValues?.get(1)?.trim()
-
-                    if (matches.isNotEmpty()) {
-                        snippet = matches.mapIndexed { idx, s -> "[Result ${idx + 1}] $s" }.joinToString("\n\n")
-                        sourceUrl = firstUrl
-                    }
+                // Nothing came back from the web - the news wire is the last
+                // try, it also covers questions that were phrased too oddly
+                // to be recognised as a news question.
+                val headlines = fetchNews(cleanQuery)
+                if (headlines.isNotEmpty()) {
+                    return@withContext newsResponse(cleanQuery, headlines)
                 }
 
-                if (snippet.isNotEmpty()) {
-                    ToolCallResponse(
-                        toolName = "duckduckgo_search",
-                        argument = query,
-                        result = "DuckDuckGo Web Search Results for '$query':\n$snippet",
-                        success = true,
-                        sourceUrl = sourceUrl
-                    )
-                } else {
-                    ToolCallResponse(
-                        toolName = "duckduckgo_search",
-                        argument = query,
-                        result = "DuckDuckGo search completed for '$query'. No instant answer found. The model will reason based on context and verified knowledge.",
-                        success = true
-                    )
-                }
+                ToolCallResponse(
+                    toolName = "duckduckgo_search",
+                    argument = cleanQuery,
+                    result = "No results for '$cleanQuery'. The search providers did not return anything usable.",
+                    success = true
+                )
             } catch (e: Exception) {
                 ToolCallResponse(
                     toolName = "duckduckgo_search",
-                    argument = query,
-                    result = "Search network call error: ${e.message ?: "Unable to contact DuckDuckGo"}. Operating in offline grounding mode.",
+                    argument = cleanQuery,
+                    result = "Search network call error: ${e.message ?: "Unable to reach the search providers"}. Operating in offline grounding mode.",
                     success = false
                 )
             }
+        }
+    }
+
+    /**
+     * DuckDuckGo's instant answer: one encyclopedic answer with a link.
+     *
+     * It is the quickest source and it is never rate limited, so it is tried
+     * first for everything that is not a question about current events.
+     */
+    private fun fetchInstantAnswer(query: String): ToolCallResponse? {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val body = get("https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1")
+            ?: return null
+
+        // A malformed answer must not take the whole search down with it.
+        return runCatching { parseInstantAnswer(query, body) }.getOrNull()
+    }
+
+    private fun parseInstantAnswer(query: String, body: String): ToolCallResponse? {
+        val json = JSONObject(body)
+
+        val abstractText = json.optString("AbstractText", "")
+        val abstractUrl = json.optString("AbstractURL", "")
+        val heading = json.optString("Heading", "")
+
+        if (abstractText.isNotEmpty()) {
+            val answer = if (heading.isNotEmpty()) "$heading: $abstractText" else abstractText
+            val text = buildString {
+                append("Search result for '").append(query).append("':\n")
+                append(answer)
+                if (abstractUrl.isNotEmpty()) {
+                    append("\n").append(abstractUrl)
+                }
+            }
+            return ToolCallResponse(
+                toolName = "duckduckgo_search",
+                argument = query,
+                result = text,
+                success = true,
+                sourceUrl = abstractUrl.ifEmpty { null }
+            )
+        }
+
+        val related = json.optJSONArray("RelatedTopics")
+        if (related != null && related.length() > 0) {
+            val snippets = mutableListOf<String>()
+            for (index in 0 until minOf(related.length(), MAX_RESULTS)) {
+                val item = related.optJSONObject(index) ?: continue
+                val text = item.optString("Text", "")
+                if (text.isNotEmpty()) {
+                    snippets.add("• $text (${item.optString("FirstURL", "")})")
+                }
+            }
+            if (snippets.isNotEmpty()) {
+                return ToolCallResponse(
+                    toolName = "duckduckgo_search",
+                    argument = query,
+                    result = "Search results for '$query':\n${snippets.joinToString("\n")}",
+                    success = true
+                )
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * DuckDuckGo's result page: the pages of the web with their title, their
+     * link and the snippet under them.
+     */
+    private fun fetchWebResults(query: String): ToolCallResponse? {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val html = get("https://html.duckduckgo.com/html/?q=$encoded") ?: return null
+
+        val results = DuckDuckGoHtmlParser.parse(html)
+        if (results.isEmpty()) return null
+
+        val text = buildString {
+            append("Search results for '").append(query).append("':\n")
+            results.take(MAX_RESULTS).forEachIndexed { index, result ->
+                append(index + 1).append(". ").append(result.title).append('\n')
+                if (result.url.isNotEmpty()) {
+                    append("   ").append(result.url).append('\n')
+                }
+                if (result.snippet.isNotEmpty()) {
+                    append("   ").append(result.snippet).append('\n')
+                }
+            }
+        }
+
+        return ToolCallResponse(
+            toolName = "duckduckgo_search",
+            argument = query,
+            result = text.trim(),
+            success = true,
+            sourceUrl = results.first().url.ifEmpty { null }
+        )
+    }
+
+    /**
+     * The headlines of the news wire.
+     *
+     * Every headline comes with the outlet that published it and the date it
+     * was published on, which is what makes "the latest news" answerable.
+     */
+    private fun fetchNews(query: String): List<NewsItem> {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = "https://news.google.com/rss/search?q=$encoded&hl=en-US&gl=US&ceid=US:en"
+        val body = get(url) ?: return emptyList()
+        return runCatching { RssParser.parse(body) }.getOrDefault(emptyList())
+    }
+
+    private fun newsResponse(query: String, headlines: List<NewsItem>): ToolCallResponse {
+        val shown = headlines.take(MAX_RESULTS)
+        val text = buildString {
+            append("Latest news for '").append(query).append("':\n")
+            shown.forEachIndexed { index, item ->
+                append(index + 1).append(". ").append(cleanHeadline(item)).append('\n')
+            }
+        }
+
+        return ToolCallResponse(
+            toolName = "duckduckgo_search",
+            argument = query,
+            result = text.trim(),
+            success = true,
+            sourceUrl = shown.firstOrNull()?.link?.ifEmpty { null }
+        )
+    }
+
+    /**
+     * A headline as "the story - the outlet", without the date the feed
+     * already repeats in the title.
+     */
+    private fun cleanHeadline(item: NewsItem): String {
+        var title = item.title
+        val source = item.source
+        if (source.isNotEmpty()) {
+            title = title.removeSuffix(" - $source")
+        }
+        val date = formatNewsDate(item.date)
+        return if (source.isNotEmpty() && date.isNotEmpty()) {
+            "$title ($source, $date)"
+        } else if (source.isNotEmpty()) {
+            "$title ($source)"
+        } else if (date.isNotEmpty()) {
+            "$title ($date)"
+        } else {
+            title
+        }
+    }
+
+    /** "Thu, 12 Nov 2026 08:49:00 GMT" becomes "12 Nov 2026". */
+    private fun formatNewsDate(raw: String): String {
+        if (raw.isBlank()) return ""
+        val parsed = runCatching {
+            SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
+                .apply { timeZone = TimeZone.getTimeZone("GMT") }
+                .parse(raw)
+        }.getOrNull() ?: return raw
+        return SimpleDateFormat("d MMM yyyy", Locale.US).format(parsed)
+    }
+
+    /** Performs a GET request and returns the body, or null when it failed. */
+    private fun get(url: String): String? {
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", MOBILE_USER_AGENT)
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                response.body?.string()
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -207,4 +325,43 @@ class MCPToolExecutor(
             "Could not parse arithmetic expression: $expr"
         }
     }
+
+    private companion object {
+        const val MOBILE_USER_AGENT =
+            "Mozilla/5.0 (Android; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0"
+
+        /** Results handed to the model at most. */
+        const val MAX_RESULTS = 5
+    }
 }
+
+/**
+ * True when the question is about what is happening right now.
+ *
+ * Those questions belong to the news wire. A plain web search answers "latest
+ * news" with the marketing copy of whichever news channel ranked first
+ * instead of with a headline.
+ */
+internal fun isNewsQuery(query: String): Boolean {
+    val text = query.lowercase(Locale.US)
+    if (NEWS_WORDS.any { text.contains(it) }) return true
+
+    val fresh = text.contains("latest") ||
+        text.contains("recent") ||
+        text.contains("up to date") ||
+        text.contains("right now")
+    val now = text.contains("today") ||
+        text.contains("currently") ||
+        text.contains("these days") ||
+        text.contains("this week")
+    return fresh && now
+}
+
+private val NEWS_WORDS = listOf(
+    "news",
+    "headline",
+    "breaking",
+    "current event",
+    "top stories",
+    "happening"
+)
