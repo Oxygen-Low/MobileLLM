@@ -7,7 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.example.ui.ChatScreen
 import com.example.ui.ChatViewModel
-import com.example.ui.theme.PocketLMTheme
+import com.example.ui.theme.MobileLLMTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -18,7 +18,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            PocketLMTheme {
+            MobileLLMTheme {
                 ChatScreen(viewModel = viewModel)
             }
         }

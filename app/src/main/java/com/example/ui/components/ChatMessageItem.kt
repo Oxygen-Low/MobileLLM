@@ -197,7 +197,7 @@ fun ChatMessageItem(
                                 IconButton(
                                     onClick = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText("PocketLM Response", message.content)
+                                        val clip = ClipData.newPlainText("MobileLLM Response", message.content)
                                         clipboard.setPrimaryClip(clip)
                                         copied = true
                                         Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()

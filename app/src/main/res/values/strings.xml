@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PocketLM</string>
+    <string name="app_name">MobileLLM</string>
     <string name="model_deepsmollm3">DeepSmolLM3</string>
     <string name="telemetry_tps">T/s</string>
     <string name="telemetry_ram">VRAM</string>

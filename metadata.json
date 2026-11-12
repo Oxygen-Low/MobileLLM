@@ -1,5 +1,5 @@
 {
-  "name": "PocketLM",
+  "name": "MobileLLM",
   "description": "On-device LLM runner for GGUF and SafeTensors models with live DuckDuckGo web search, MCP tools, and real-time telemetry.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

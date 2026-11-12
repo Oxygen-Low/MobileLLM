@@ -28,7 +28,7 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 @Composable
-fun PocketLMTheme(
+fun MobileLLMTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
