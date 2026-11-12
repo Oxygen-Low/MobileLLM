@@ -62,6 +62,19 @@ class ToolCallDetectorTest {
     }
 
     @Test
+    fun `the labelled form the model emits is detected`() {
+        val detector = detector()
+
+        detector.feed(
+            "<tool_call>\ntool_name: duckduckgo_search\n_argument: latest news\n</tool_call>"
+        )
+
+        assertTrue(detector.isComplete)
+        assertEquals("duckduckgo_search", detector.toolCall()?.toolName)
+        assertEquals("latest news", detector.toolCall()?.argument)
+    }
+
+    @Test
     fun `an unknown tool name is not treated as a call`() {
         val detector = detector()
 
@@ -107,33 +120,70 @@ class ToolCallDetectorTest {
 
 class ToolCallParserTest {
 
+    private val knownTools = setOf(
+        "duckduckgo_search",
+        "get_current_datetime",
+        "calculate_expression"
+    )
+
     @Test
     fun `name and argument are parsed from the simple form`() {
-        val call = ToolCallParser.parse("duckduckgo_search: who won the world cup")
+        val call = ToolCallParser.parse("duckduckgo_search: who won the world cup", knownTools)
 
         assertEquals("duckduckgo_search", call?.toolName)
         assertEquals("who won the world cup", call?.argument)
     }
 
     @Test
-    fun `quoted arguments are unwrapped`() {
-        val call = ToolCallParser.parse("duckduckgo_search: \"rust 1.90 release date\"")
+    fun `a labelled name and argument are parsed`() {
+        val call = ToolCallParser.parse(
+            "tool_name: duckduckgo_search\n_argument: latest news",
+            knownTools
+        )
 
-        assertEquals("rust 1.90 release date", call?.argument)
+        assertEquals("duckduckgo_search", call?.toolName)
+        assertEquals("latest news", call?.argument)
     }
 
     @Test
-    fun `a bare tool name has no argument`() {
-        val call = ToolCallParser.parse("get_current_datetime:")
+    fun `a labelled name with a name only tool has no argument`() {
+        val call = ToolCallParser.parse("tool_name: get_current_datetime", knownTools)
 
         assertEquals("get_current_datetime", call?.toolName)
         assertEquals("", call?.argument)
     }
 
     @Test
+    fun `a bare tool name is parsed without an argument`() {
+        val call = ToolCallParser.parse("get_current_datetime", knownTools)
+
+        assertEquals("get_current_datetime", call?.toolName)
+        assertEquals("", call?.argument)
+    }
+
+    @Test
+    fun `a bare tool name followed by the argument is parsed`() {
+        val call = ToolCallParser.parse("duckduckgo_search\nlatest news", knownTools)
+
+        assertEquals("duckduckgo_search", call?.toolName)
+        assertEquals("latest news", call?.argument)
+    }
+
+    @Test
+    fun `quoted arguments are unwrapped`() {
+        val call = ToolCallParser.parse(
+            "duckduckgo_search: \"rust 1.90 release date\"",
+            knownTools
+        )
+
+        assertEquals("rust 1.90 release date", call?.argument)
+    }
+
+    @Test
     fun `a json body is parsed as well`() {
         val call = ToolCallParser.parse(
-            "{\"name\": \"duckduckgo_search\", \"arguments\": {\"query\": \"kotlin 2.0\"}}"
+            "{\"name\": \"duckduckgo_search\", \"arguments\": {\"query\": \"kotlin 2.0\"}}",
+            knownTools
         )
 
         assertEquals("duckduckgo_search", call?.toolName)
@@ -141,9 +191,10 @@ class ToolCallParserTest {
     }
 
     @Test
-    fun `prose without a tool name is rejected`() {
-        assertNull(ToolCallParser.parse("just some prose about tools"))
-        assertNull(ToolCallParser.parse("   "))
+    fun `an unknown tool name is rejected`() {
+        assertNull(ToolCallParser.parse("tool_name: unknown_tool\n_argument: x", knownTools))
+        assertNull(ToolCallParser.parse("prose about tools", knownTools))
+        assertNull(ToolCallParser.parse("   ", knownTools))
     }
 }
 
