@@ -99,6 +99,7 @@ fun ChatScreen(
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
     val activeToolQuery by viewModel.activeToolQuery.collectAsStateWithLifecycle()
     val activeToolSourceUrl by viewModel.activeToolSourceUrl.collectAsStateWithLifecycle()
+    val persistedReplyId by viewModel.persistedReplyId.collectAsStateWithLifecycle()
 
     var isHistoryOpen by remember { mutableStateOf(false) }
     var isModelsHubOpen by remember { mutableStateOf(false) }
@@ -111,7 +112,14 @@ fun ChatScreen(
         derivedStateOf { !listState.canScrollForward }
     }
 
-    val transcriptSize = messages.size + if (isGenerating) 1 else 0
+    // The live streaming bubble hands over to the finished reply only once that
+    // reply is part of the transcript. Handing over earlier blinks the answer
+    // out for a frame, handing over later shows it twice.
+    val replyIsShown = persistedReplyId != null && messages.any { it.id == persistedReplyId }
+    val showStreamingItem = !replyIsShown &&
+            (isGenerating || streamingContent.isNotEmpty() || streamingReasoning.isNotEmpty())
+
+    val transcriptSize = messages.size + if (showStreamingItem) 1 else 0
 
     val downloadInfo = downloadStates[currentModel.id]
     val isCurrentDownloaded = currentModel.downloadState == ModelDownloadState.DOWNLOADED ||
@@ -122,10 +130,21 @@ fun ChatScreen(
     // New message (user send or finalized reply): glide to the bottom. A message
     // the user just sent always pulls the view down; otherwise only follow when
     // the user is already at the bottom.
+    //
+    // A rewind makes the transcript *shorter*. The list is still scrolled to an
+    // index that no longer exists at that moment, so an animated scroll would
+    // race the removal of the items and land somewhere in between. Snap to the
+    // new end instead - one clean reposition, no flicker. The item count of the
+    // last layout is what tells us the list is about to shrink.
     LaunchedEffect(transcriptSize) {
+        val shrinking = transcriptSize < listState.layoutInfo.totalItemsCount
         val userJustSent = messages.lastOrNull()?.role == "user"
         if (transcriptSize > 0 && (isAtBottom || userJustSent)) {
-            listState.animateScrollToItem(transcriptSize - 1)
+            if (shrinking) {
+                listState.scrollToItem(transcriptSize - 1)
+            } else {
+                listState.animateScrollToItem(transcriptSize - 1)
+            }
         }
     }
 
@@ -352,7 +371,7 @@ fun ChatScreen(
                     }
 
                     // Render active streaming message item
-                    if (isGenerating) {
+                    if (showStreamingItem) {
                         item(key = "active_stream") {
                             val activeMsg = ChatMessageEntity(
                                 id = "streaming_active",
