@@ -4,6 +4,28 @@ import java.io.ByteArrayOutputStream
 import java.util.Locale
 
 /**
+ * The markers a model uses to delimit a tool call.
+ *
+ * The system prompt, the parser and the replayed transcript all have to agree
+ * on the exact spelling, so the tags live in one place.
+ */
+internal object ToolCallTags {
+    const val OPEN = "<tool_call>"
+    const val CLOSE = "</tool_call>"
+
+    /** Wraps [body] into a tool call block. */
+    fun block(body: String): String = "$OPEN\n$body\n$CLOSE"
+}
+
+/**
+ * The markers a model uses to delimit its reasoning.
+ */
+internal object ThinkTags {
+    const val OPEN = "<think>"
+    const val CLOSE = "</think>"
+}
+
+/**
  * Decodes a token stream into text without splitting multi-byte UTF-8
  * sequences: llama.cpp emits raw bytes, and a single glyph can span tokens.
  */
@@ -139,8 +161,8 @@ internal class ToolCallDetector(knownTools: Set<String>) {
     }
 
     private companion object {
-        const val OPEN = "<tool_call>"
-        const val CLOSE = "</tool_call>"
+        const val OPEN = ToolCallTags.OPEN
+        const val CLOSE = ToolCallTags.CLOSE
     }
 }
 
@@ -344,8 +366,8 @@ internal class ThinkStreamSplitter(startInsideThinking: Boolean = false) {
     }
 
     private companion object {
-        const val OPEN = "<think>"
-        const val CLOSE = "</think>"
+        const val OPEN = ThinkTags.OPEN
+        const val CLOSE = ThinkTags.CLOSE
     }
 }
 

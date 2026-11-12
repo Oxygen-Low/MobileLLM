@@ -57,6 +57,21 @@ class ChatTranscriptTest {
     }
 
     @Test
+    fun `regenerate drops the tool steps of the run it replaces`() {
+        // user -> tool -> tool -> assistant: the tool steps belong to the run
+        // that is being replaced and would survive as orphans otherwise.
+        val messages = transcript("user", "tool", "tool", "assistant")
+
+        val index = ChatTranscript.lastUserIndexAtOrBefore(messages, 3)
+
+        assertEquals(0, index)
+        assertEquals(
+            listOf("m0", "m1", "m2", "m3"),
+            ChatTranscript.idsFrom(messages, index)
+        )
+    }
+
+    @Test
     fun `rewinding to the last message changes nothing`() {
         val messages = transcript("user", "assistant", "user", "assistant")
 

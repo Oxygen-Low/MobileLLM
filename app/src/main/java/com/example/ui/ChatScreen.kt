@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ChatMessageEntity
 import com.example.model.ModelDownloadState
 import com.example.model.ModelLoadState
+import com.example.ui.components.AgentStepItem
 import com.example.ui.components.ChatInputBar
 import com.example.ui.components.ChatMessageItem
 import com.example.ui.components.ModelsHubSheet
@@ -96,9 +97,7 @@ fun ChatScreen(
 
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
-    val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
-    val activeToolQuery by viewModel.activeToolQuery.collectAsStateWithLifecycle()
-    val activeToolSourceUrl by viewModel.activeToolSourceUrl.collectAsStateWithLifecycle()
+    val agentSteps by viewModel.agentSteps.collectAsStateWithLifecycle()
     val persistedReplyId by viewModel.persistedReplyId.collectAsStateWithLifecycle()
 
     var isHistoryOpen by remember { mutableStateOf(false) }
@@ -119,7 +118,13 @@ fun ChatScreen(
     val showStreamingItem = !replyIsShown &&
             (isGenerating || streamingContent.isNotEmpty() || streamingReasoning.isNotEmpty())
 
-    val transcriptSize = messages.size + if (showStreamingItem) 1 else 0
+    // A tool step that has already been written to the transcript is rendered
+    // from there - showing the live one as well would print it twice.
+    val liveSteps = remember(agentSteps, messages) {
+        agentSteps.filterNot { step -> messages.any { it.id == step.id } }
+    }
+
+    val transcriptSize = messages.size + liveSteps.size + if (showStreamingItem) 1 else 0
 
     val downloadInfo = downloadStates[currentModel.id]
     val isCurrentDownloaded = currentModel.downloadState == ModelDownloadState.DOWNLOADED ||
@@ -370,26 +375,38 @@ fun ChatScreen(
                         )
                     }
 
+                    // The steps of the agent run that are not in the transcript
+                    // yet: the model asked for a tool, the tool answered.
+                    items(liveSteps, key = { it.id }) { step ->
+                        AgentStepItem(step = step)
+                    }
+
                     // Render active streaming message item
                     if (showStreamingItem) {
                         item(key = "active_stream") {
+                            // While a tool is running the step above already
+                            // says what is going on, so the bubble stays empty
+                            // instead of repeating "Thinking…".
+                            val placeholder = liveSteps.isEmpty()
                             val activeMsg = ChatMessageEntity(
                                 id = "streaming_active",
                                 sessionId = currentSessionId ?: "",
                                 role = "assistant",
-                                content = if (streamingContent.isNotEmpty()) streamingContent else if (streamingReasoning.isNotEmpty()) "" else "Thinking…",
+                                content = when {
+                                    streamingContent.isNotEmpty() -> streamingContent
+                                    streamingReasoning.isNotEmpty() -> ""
+                                    placeholder -> "Thinking…"
+                                    else -> ""
+                                },
                                 reasoningContent = streamingReasoning.ifBlank { null },
                                 tokensCount = (streamingReasoning.length + streamingContent.length) / 4,
-                                tokensPerSecond = currentTps,
-                                isToolExecution = activeToolName != null,
-                                toolName = activeToolName,
-                                toolQuery = activeToolQuery,
-                                toolSourceUrl = activeToolSourceUrl
+                                tokensPerSecond = currentTps
                             )
                             ChatMessageItem(
                                 message = activeMsg,
                                 modelName = currentModel.shortName,
-                                isStreaming = true
+                                isStreaming = true,
+                                showThinkingPlaceholder = placeholder
                             )
                         }
                     }

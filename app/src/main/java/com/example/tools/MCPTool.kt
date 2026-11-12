@@ -6,6 +6,20 @@ data class MCPTool(
     val parametersDescription: String
 )
 
+/**
+ * A human readable name for a tool.
+ *
+ * The model calls tools by their raw name, the UI shows this one - "Used
+ * DuckDuckGo Search" reads better than "Used duckduckgo_search".
+ */
+fun toolDisplayName(toolName: String?): String = when (toolName) {
+    "duckduckgo_search" -> "DuckDuckGo Search"
+    "get_current_datetime" -> "Device Clock"
+    "calculate_expression" -> "Calculator"
+    null -> "Tool"
+    else -> toolName
+}
+
 data class ToolCallRequest(
     val toolName: String,
     val argument: String

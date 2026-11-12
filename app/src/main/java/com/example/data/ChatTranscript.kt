@@ -45,6 +45,16 @@ object ChatTranscript {
         messages.drop(index + 1).map { it.id }
 
     /**
+     * Ids of [index] and everything that follows it.
+     *
+     * A regenerate replaces a whole run, not just its last row: the tool
+     * steps between the prompt and the reply belong to that run as well and
+     * would otherwise survive as orphans of a deleted reply.
+     */
+    fun idsFrom(messages: List<ChatMessageEntity>, index: Int): List<String> =
+        messages.drop(index).map { it.id }
+
+    /**
      * The prompt a reply was produced from, together with the reply itself.
      * Regenerating drops both and replays the prompt.
      */

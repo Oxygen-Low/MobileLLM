@@ -26,9 +26,34 @@ import java.util.Random
 
 sealed class GenerationEvent {
     data class ThinkingToken(val token: String) : GenerationEvent()
-    data class ToolExecuting(val toolName: String, val argument: String) : GenerationEvent()
-    data class ToolResult(val toolName: String, val resultSnippet: String, val sourceUrl: String?) : GenerationEvent()
     data class ContentToken(val token: String) : GenerationEvent()
+
+    /**
+     * The model asked for a tool.
+     *
+     * [reasoning] is the trace it produced before the call and [preamble] the
+     * text it wrote next to it. Both belong to the step that is starting, not
+     * to the round that comes after it.
+     */
+    data class ToolExecuting(
+        val toolName: String,
+        val argument: String,
+        val reasoning: String = "",
+        val preamble: String = ""
+    ) : GenerationEvent()
+
+    /**
+     * The tool answered.
+     *
+     * [result] is the text the model gets to see and the transcript keeps.
+     */
+    data class ToolResult(
+        val toolName: String,
+        val argument: String,
+        val result: String,
+        val sourceUrl: String?
+    ) : GenerationEvent()
+
     data class TelemetryUpdate(
         val tokensGenerated: Int,
         val tokensPerSecond: Double,
@@ -213,19 +238,35 @@ class ModelEngineManager(
 
                     if (round.cancelled) return@launch
 
-                    finalThinking = round.displayThinking
-                    finalContent = round.displayContent
-
                     val call = round.toolCall
-                    if (call == null) break
+                    if (call == null) {
+                        // The model answered: this round holds the reasoning
+                        // that belongs to the answer. A round that ended in a
+                        // tool call does not - its reasoning belongs to the
+                        // step, and the next round reasons over the result.
+                        finalThinking = round.displayThinking
+                        finalContent = round.displayContent
+                        break
+                    }
 
-                    trySend(GenerationEvent.ToolExecuting(call.first, call.second))
+                    // The round that produced the call is over. Its reasoning
+                    // and its preamble belong to the step, so they are handed
+                    // over instead of being overwritten by the next round.
+                    trySend(
+                        GenerationEvent.ToolExecuting(
+                            toolName = call.first,
+                            argument = call.second,
+                            reasoning = round.displayThinking,
+                            preamble = round.displayContent
+                        )
+                    )
                     val response = mcpToolExecutor.executeTool(call.first, call.second)
                     lastToolResult = response.result
                     trySend(
                         GenerationEvent.ToolResult(
                             toolName = response.toolName,
-                            resultSnippet = response.result.take(MAX_TOOL_RESULT_SNIPPET_CHARS),
+                            argument = response.argument,
+                            result = response.result.take(MAX_TOOL_RESULT_CHARS),
                             sourceUrl = response.sourceUrl
                         )
                     )
@@ -466,7 +507,8 @@ class ModelEngineManager(
             builder.append("\n  parameter: ").append(tool.parametersDescription)
         }
 
-        builder.append("\n\nWhen you need a tool, output exactly one tool call in this format and nothing else (after your reasoning, if reasoning is enabled):")
+        builder.append("\n\nWork in steps: think briefly, call a tool when you need one, read what it returned, then either call another tool or answer.")
+        builder.append("\nWhen you need a tool, output exactly one tool call in this format and nothing else (after your reasoning, if reasoning is enabled):")
         builder.append("\n<tool_call>")
         builder.append("\nduckduckgo_search: latest news")
         builder.append("\n</tool_call>")
@@ -514,8 +556,5 @@ class ModelEngineManager(
 
         /** Tool result kept in the replayed conversation (chars). */
         const val MAX_TOOL_RESULT_CHARS = 1500
-
-        /** Tool result shown in the UI banner (chars). */
-        const val MAX_TOOL_RESULT_SNIPPET_CHARS = 500
     }
 }

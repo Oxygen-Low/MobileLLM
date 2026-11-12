@@ -8,6 +8,8 @@ import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
 import com.example.data.ChatSessionEntity
 import com.example.data.ChatTranscript
+import com.example.model.AgentStep
+import com.example.model.AgentTranscript
 import com.example.model.DownloadProgressInfo
 import com.example.model.GenerationEvent
 import com.example.model.ModelDownloadManager
@@ -17,6 +19,7 @@ import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.model.PromptFormat
 import com.example.model.ReasoningLevel
+import com.example.model.StoredTurn
 import com.example.tools.MCPToolExecutor
 import com.example.update.UpdateManager
 import kotlinx.coroutines.Job
@@ -79,9 +82,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // Streaming state for the active message
     val streamingReasoning = MutableStateFlow("")
     val streamingContent = MutableStateFlow("")
-    val activeToolName = MutableStateFlow<String?>(null)
-    val activeToolQuery = MutableStateFlow<String?>(null)
-    val activeToolSourceUrl = MutableStateFlow<String?>(null)
+
+    /**
+     * The steps of the agent loop of the current turn.
+     *
+     * Every entry is one "the model reasoned → the model called a tool → the
+     * tool answered" cycle. They are kept next to each other instead of being
+     * overwritten by the next round, so a turn that used three tools shows
+     * three steps and the next turn can be replayed with that history.
+     */
+    val agentSteps = MutableStateFlow<List<AgentStep>>(emptyList())
 
     // Id of the assistant reply that has been written to the database for the
     // current turn. The UI keeps the live streaming bubble on screen until
@@ -101,9 +111,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _persistedReplyId.value = null
         streamingReasoning.value = ""
         streamingContent.value = ""
-        activeToolName.value = null
-        activeToolQuery.value = null
-        activeToolSourceUrl.value = null
+        agentSteps.value = emptyList()
     }
 
     // Queued prompt if user submitted while downloading
@@ -113,6 +121,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var inactivityJob: Job? = null
     private var updateCheckJob: Job? = null
     private var lastActivityResetMs = 0L
+
+    /** Timestamp of the last stored message; see [nextTimestamp]. */
+    private var lastMessageTimestamp = 0L
 
     init {
         // Check if models were already downloaded locally
@@ -423,13 +434,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 id = UUID.randomUUID().toString(),
                 sessionId = activeSessionId,
                 role = "user",
-                content = promptText
+                content = promptText,
+                timestamp = nextTimestamp()
             )
             repository.insertMessage(userMsg)
 
             // 2. Prepare streaming state
             clearStreamingState()
             _isGenerating.value = true
+
+            // The id of the reply is known up front: the tool steps of this turn
+            // are numbered relative to it, so a live step and the transcript
+            // row it becomes share the same identity.
+            val replyId = UUID.randomUUID().toString()
 
             var recordedTps = 0.0
             var recordedTokens = 0
@@ -453,16 +470,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ).collect { event ->
                     when (event) {
                         is GenerationEvent.ToolExecuting -> {
-                            // The model switched to a tool: the reasoning and
-                            // answer of this round are replaced by the next
-                            // round, which reasons over the tool result.
+                            // The model switched to a tool. The round is over,
+                            // so its reasoning and its preamble move into the
+                            // step that is starting instead of being
+                            // overwritten by the next round.
+                            val step = AgentStep(
+                                id = "$replyId/step-${agentSteps.value.size}",
+                                toolName = event.toolName,
+                                argument = event.argument,
+                                reasoning = buildStepReasoning(
+                                    event.reasoning,
+                                    event.preamble
+                                ),
+                                isRunning = true
+                            )
+                            agentSteps.value = agentSteps.value + step
                             streamingReasoning.value = ""
                             streamingContent.value = ""
-                            activeToolName.value = event.toolName
-                            activeToolQuery.value = event.argument
                         }
                         is GenerationEvent.ToolResult -> {
-                            activeToolSourceUrl.value = event.sourceUrl
+                            // The tool answered: the step that was waiting for
+                            // it is complete.
+                            val result = event.result
+                            val sourceUrl = event.sourceUrl
+                            agentSteps.value = agentSteps.value.map { step ->
+                                if (step.toolName == event.toolName && step.isRunning) {
+                                    step.copy(
+                                        result = result,
+                                        sourceUrl = sourceUrl,
+                                        isRunning = false
+                                    )
+                                } else {
+                                    step
+                                }
+                            }
                         }
                         is GenerationEvent.ThinkingToken -> {
                             streamingReasoning.value += event.token
@@ -489,19 +530,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 finalContent = streamingContent.value.ifEmpty { "Generation interrupted: ${e.message}" }
             } finally {
                 try {
-                    // 4. Save Assistant Message into Room
+                    // 4. Save the agent trace and the reply into Room.
+                    // Every tool step becomes a row of its own so the
+                    // transcript keeps the order of the run: the model asked,
+                    // the tool answered, the model continued.
+                    for (step in agentSteps.value) {
+                        repository.insertMessage(
+                            ChatMessageEntity(
+                                id = step.id,
+                                sessionId = activeSessionId,
+                                role = "tool",
+                                content = step.result.orEmpty(),
+                                reasoningContent = step.reasoning.ifBlank { null },
+                                isToolExecution = true,
+                                toolName = step.toolName,
+                                toolQuery = step.argument,
+                                toolSourceUrl = step.sourceUrl,
+                                timestamp = nextTimestamp()
+                            )
+                        )
+                    }
+
                     val assistantMsg = ChatMessageEntity(
-                        id = UUID.randomUUID().toString(),
+                        id = replyId,
                         sessionId = activeSessionId,
                         role = "assistant",
                         content = if (finalContent.isNotEmpty()) finalContent else streamingContent.value,
                         reasoningContent = if (finalThinking.isNotEmpty()) finalThinking else streamingReasoning.value.ifBlank { null },
                         tokensCount = recordedTokens,
                         tokensPerSecond = recordedTps,
-                        isToolExecution = activeToolName.value != null,
-                        toolName = activeToolName.value,
-                        toolQuery = activeToolQuery.value,
-                        toolSourceUrl = activeToolSourceUrl.value
+                        timestamp = nextTimestamp()
                     )
                     repository.insertMessage(assistantMsg)
 
@@ -530,22 +588,64 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * The reasoning of a tool step: what the model thought about it plus what
+     * it wrote next to the call.
+     */
+    private fun buildStepReasoning(reasoning: String, preamble: String): String {
+        val trace = reasoning.trim()
+        val note = preamble.trim()
+        return when {
+            trace.isEmpty() -> note
+            note.isEmpty() -> trace
+            else -> "$trace\n\n$note"
+        }
+    }
+
+    /**
+     * A timestamp that is strictly larger than the one of the previous
+     * message.
+     *
+     * The transcript is ordered by timestamp, and a turn can write several
+     * rows within the same millisecond. Without the bump their order would be
+     * left to the database.
+     */
+    private fun nextTimestamp(): Long {
+        val now = System.currentTimeMillis()
+        lastMessageTimestamp = maxOf(now, lastMessageTimestamp + 1)
+        return lastMessageTimestamp
+    }
+
+    /**
      * Builds conversation context from previously stored turns, trimmed from the
      * oldest message until it fits the prompt budget of an on-device model.
+     *
+     * Tool steps are part of the context: a step is replayed as the assistant
+     * turn that made the call followed by the tool turn that answered it. That
+     * is what keeps the model from forgetting what it already looked up and
+     * repeating the same search in the next question.
      */
     private suspend fun loadHistory(sessionId: String): List<PromptFormat.Turn> {
         return try {
-            val turns = repository.getMessagesForSession(sessionId).first()
-                .filter { it.role == "user" || it.role == "assistant" }
-                .takeLast(MAX_HISTORY_MESSAGES)
-                .mapNotNull { message ->
-                    val text = message.content.trim().take(MAX_HISTORY_CHARS_PER_MESSAGE)
-                    if (text.isEmpty()) null else PromptFormat.Turn(message.role, text)
-                }
+            val messages = repository.getMessagesForSession(sessionId).first()
+            val turns = mutableListOf<PromptFormat.Turn>()
+
+            for (message in messages) {
+                turns.addAll(
+                    AgentTranscript.turnsFor(
+                        StoredTurn(
+                            role = message.role,
+                            content = message.content,
+                            reasoning = message.reasoningContent,
+                            toolName = message.toolName,
+                            toolQuery = message.toolQuery
+                        )
+                    )
+                )
+            }
 
             var budget = MAX_HISTORY_CHARS_TOTAL
             val selected = ArrayDeque<PromptFormat.Turn>()
-            for (turn in turns.asReversed()) {
+            for (turn in turns.takeLast(MAX_HISTORY_TURNS).asReversed()) {
                 if (turn.content.length > budget) break
                 budget -= turn.content.length
                 selected.addFirst(turn)
@@ -588,13 +688,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // so a stale bubble cannot reappear over the new turn.
             clearStreamingState()
 
-            // Drop the reply and its prompt; executePromptStream re-inserts the
-            // prompt as a fresh user turn before generating the new reply.
+            // Drop the reply, its prompt and the tool steps in between; they
+            // belong to the run that is being replaced. executePromptStream
+            // re-inserts the prompt as a fresh user turn before generating the
+            // new reply.
             repository.deleteMessagesByIds(
-                listOf(
-                    transcript[target.promptIndex].id,
-                    transcript[target.replyIndex].id
-                )
+                ChatTranscript.idsFrom(transcript, target.promptIndex)
             )
 
             if (modelEngineManager.loadState.value != ModelLoadState.LOADED) {
@@ -647,8 +746,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private companion object {
-        const val MAX_HISTORY_MESSAGES = 10
-        const val MAX_HISTORY_CHARS_PER_MESSAGE = 2000
+        const val MAX_HISTORY_TURNS = 16
         const val MAX_HISTORY_CHARS_TOTAL = 6000
 
         const val INACTIVITY_TIMEOUT_MS = 30_000L

@@ -3,8 +3,6 @@ package com.example.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,19 +23,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.VolumeUp
@@ -68,7 +61,6 @@ import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
 import com.example.ui.theme.GptEmerald
-import com.example.ui.theme.ReasoningAmber
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TelemetryCyan
@@ -88,6 +80,7 @@ fun ChatMessageItem(
     modifier: Modifier = Modifier,
     showRewind: Boolean = false,
     showRegenerate: Boolean = false,
+    showThinkingPlaceholder: Boolean = true,
     onRewind: () -> Unit = {},
     onRegenerate: () -> Unit = {}
 ) {
@@ -129,6 +122,17 @@ fun ChatMessageItem(
                     )
                 }
             }
+        } else if (message.role == "tool") {
+            // A step of the agent run: what the model asked for and what it
+            // got back. It is not a reply of its own.
+            AgentStepItem(
+                toolName = message.toolName,
+                argument = message.toolQuery.orEmpty(),
+                result = message.content,
+                sourceUrl = message.toolSourceUrl,
+                reasoning = message.reasoningContent.orEmpty(),
+                modifier = Modifier.testTag("tool_step_${message.id}")
+            )
         } else {
             // Assistant Message (ChatGPT style: natural full-width document flow)
             Column(
@@ -136,11 +140,13 @@ fun ChatMessageItem(
                     .fillMaxWidth()
                     .testTag("assistant_message_${message.id}")
             ) {
-                // Tool Execution Banner (web search, clock, calculator)
+                // Tool Execution Marker (web search, clock, calculator). Rows
+                // written before the agent trace existed keep their tool on the
+                // reply itself.
                 if (message.isToolExecution || !message.toolQuery.isNullOrEmpty()) {
-                    ModernToolExecutionBanner(
+                    ToolUsageChip(
                         toolName = message.toolName,
-                        query = message.toolQuery ?: "",
+                        argument = message.toolQuery.orEmpty(),
                         sourceUrl = message.toolSourceUrl
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -150,7 +156,7 @@ fun ChatMessageItem(
                 // token we show "Thinking…"; it disappears if the model answers
                 // without emitting a reasoning trace.
                 if (!message.reasoningContent.isNullOrBlank() ||
-                    (isStreaming && message.content.isBlank())
+                    (isStreaming && message.content.isBlank() && showThinkingPlaceholder)
                 ) {
                     ReasoningAccordion(
                         reasoningText = message.reasoningContent ?: "",
@@ -375,98 +381,6 @@ private fun RichMessageContent(content: String) {
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun ModernToolExecutionBanner(
-    toolName: String?,
-    query: String,
-    sourceUrl: String?,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-
-    val label = when (toolName) {
-        "duckduckgo_search" -> "DuckDuckGo Search"
-        "get_current_datetime" -> "Device Clock"
-        "calculate_expression" -> "Calculator"
-        null -> "Tool"
-        else -> toolName
-    }
-    val icon = when (toolName) {
-        "duckduckgo_search" -> Icons.Default.Language
-        "get_current_datetime" -> Icons.Default.Schedule
-        "calculate_expression" -> Icons.Default.Calculate
-        else -> Icons.Default.Build
-    }
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = !sourceUrl.isNullOrEmpty()) {
-                sourceUrl?.let { url ->
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        // ignore
-                    }
-                }
-            },
-        color = SurfaceElevated.copy(alpha = 0.7f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, ReasoningAmber.copy(alpha = 0.35f))
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.weight(1f, fill = false),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = ReasoningAmber,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = ReasoningAmber,
-                            fontSize = 11.sp
-                        )
-                    )
-                    if (query.isNotEmpty()) {
-                        Text(
-                            text = "\"$query\"",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                color = TextSecondary
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            if (!sourceUrl.isNullOrEmpty()) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                    contentDescription = "Open Source Link",
-                    tint = TelemetryCyan,
-                    modifier = Modifier.size(14.dp)
-                )
             }
         }
     }
