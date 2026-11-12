@@ -45,6 +45,7 @@ object LlamaBridge {
         minP: Float,
         repeatPenalty: Float,
         seed: Int,
+        maxReasoningTokens: Int,
         callback: TokenCallback
     ): Int
 }

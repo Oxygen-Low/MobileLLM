@@ -200,7 +200,14 @@ class ModelEngineManager(
                 }.getOrDefault(0)
                 Log.i(TAG, "Prompt: ${renderedPrompt.length} chars, ~$promptTokens tokens, history=${history.size}")
 
-                val splitter = ThinkStreamSplitter()
+                // When the prompt is prefilled with `<think>`, the stream starts
+                // inside the reasoning block rather than with the opening tag.
+                val thinkingMode = PromptFormat.resolveReasoningMode(
+                    system = system,
+                    enableThinking = enableThinking,
+                    reasoningLevel = reasoningLevel
+                ) == "/think"
+                val splitter = ThinkStreamSplitter(startInsideThinking = thinkingMode)
                 val decoder = Utf8StreamDecoder()
                 val thinking = StringBuilder()
                 val content = StringBuilder()
@@ -233,6 +240,10 @@ class ModelEngineManager(
                     minP = MIN_P,
                     repeatPenalty = REPEAT_PENALTY,
                     seed = random.nextInt(),
+                    // llama.cpp cannot switch thinking off/on natively, so the
+                    // budget makes the level a real generation setting: the
+                    // native loop closes the think block once it is exhausted.
+                    maxReasoningTokens = if (thinkingMode) reasoningLevel.reasoningBudget else 0,
                     callback = LlamaBridge.TokenCallback { bytes ->
                         if (!isActive) return@TokenCallback false
 

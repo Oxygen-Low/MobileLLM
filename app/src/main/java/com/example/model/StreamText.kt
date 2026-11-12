@@ -51,12 +51,12 @@ internal class Utf8StreamDecoder {
  * Splits the model's `<think>…</think>` output into reasoning and answer
  * segments while keeping the stream incremental.
  */
-internal class ThinkStreamSplitter {
+internal class ThinkStreamSplitter(startInsideThinking: Boolean = false) {
 
     data class Chunk(val thinking: Boolean, val text: String)
 
     private val buffer = StringBuilder()
-    private var insideThinking = false
+    private var insideThinking = startInsideThinking
 
     fun feed(text: String): List<Chunk> {
         buffer.append(text)

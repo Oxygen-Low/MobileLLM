@@ -278,7 +278,8 @@ JNIEXPORT jint JNICALL
 Java_com_example_model_internal_LlamaBridge_nativeGenerate(
         JNIEnv * env, jobject, jlong handle, jstring j_prompt,
         jint max_tokens, jfloat temperature, jint top_k, jfloat top_p,
-        jfloat min_p, jfloat repeat_penalty, jint seed, jobject callback) {
+        jfloat min_p, jfloat repeat_penalty, jint seed,
+        jint max_reasoning_tokens, jobject callback) {
     Engine * engine = from_handle(handle);
     if (engine == nullptr || !engine->loaded || engine->ctx == nullptr) {
         throw_illegal_state(env, "No model is loaded");
@@ -308,16 +309,22 @@ Java_com_example_model_internal_LlamaBridge_nativeGenerate(
         return 0;
     }
 
-    // Never let prompt + generation overflow the context window. Long
-    // conversations are truncated from the front (oldest turns) so that the
-    // latest user request and the system header survive where possible.
+    // Never let prompt + generation overflow the context window. Shrink the
+    // generation budget first: truncating the prompt would drop the system
+    // header (and its `/think` switch), which silently disables reasoning.
     const int32_t ctx_size = static_cast<int32_t>(llama_n_ctx(engine->ctx));
-    const int32_t prompt_budget = std::max(32, ctx_size - max_tokens - 8);
-    if (static_cast<int32_t>(prompt_tokens.size()) > prompt_budget) {
-        const size_t drop = prompt_tokens.size() - static_cast<size_t>(prompt_budget);
+    const int32_t prompt_limit = std::max(32, ctx_size - 8);
+    if (static_cast<int32_t>(prompt_tokens.size()) > prompt_limit) {
+        const size_t drop = prompt_tokens.size() - static_cast<size_t>(prompt_limit);
         LOGW("prompt has %zu tokens, dropping the oldest %zu to fit n_ctx=%d",
              prompt_tokens.size(), drop, ctx_size);
         prompt_tokens.erase(prompt_tokens.begin(), prompt_tokens.begin() + static_cast<long>(drop));
+    }
+    const int32_t effective_max_tokens = std::max(
+            16, std::min(max_tokens, ctx_size - static_cast<int32_t>(prompt_tokens.size()) - 8));
+    if (effective_max_tokens < max_tokens) {
+        LOGW("reducing generation budget from %d to %d tokens to fit n_ctx=%d",
+             max_tokens, effective_max_tokens, ctx_size);
     }
 
     const int32_t n_batch = static_cast<int32_t>(llama_n_batch(engine->ctx));
@@ -364,12 +371,91 @@ Java_com_example_model_internal_LlamaBridge_nativeGenerate(
     // ---- decode loop -------------------------------------------------------
     int32_t generated = 0;
     int32_t result = 0;
-    char piece[512];
 
-    for (int32_t i = 0; i < max_tokens; ++i) {
+    // The prompt is prefilled with `<think>` for reasoning levels, so the
+    // stream starts inside the reasoning block. Track it here so the budget
+    // can be enforced and the block closed before the answer is generated.
+    bool inside_thinking = max_reasoning_tokens > 0;
+    int32_t reasoning_tokens = 0;
+    std::string think_tail;
+
+    auto token_to_text = [&](llama_token token, std::string & out) {
+        char small[512];
+        int32_t n_piece = llama_token_to_piece(
+                engine->vocab, token, small, static_cast<int32_t>(sizeof(small)), 0, false);
+        out.clear();
+        if (n_piece < 0) {
+            std::vector<char> big(static_cast<size_t>(-n_piece));
+            n_piece = llama_token_to_piece(
+                    engine->vocab, token, big.data(), static_cast<int32_t>(big.size()), 0, false);
+            if (n_piece > 0) {
+                out.assign(big.data(), static_cast<size_t>(n_piece));
+            }
+        } else if (n_piece > 0) {
+            out.assign(small, static_cast<size_t>(n_piece));
+        }
+    };
+
+    auto emit_text = [&](const std::string & text) -> int {
+        if (text.empty()) {
+            return 1;
+        }
+        jbyteArray bytes = env->NewByteArray(static_cast<jsize>(text.size()));
+        env->SetByteArrayRegion(
+                bytes, 0, static_cast<jsize>(text.size()),
+                reinterpret_cast<const jbyte *>(text.data()));
+        const jboolean keep_going = env->CallBooleanMethod(callback, on_token, bytes);
+        env->DeleteLocalRef(bytes);
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            return -1;
+        }
+        return keep_going ? 1 : 0;
+    };
+
+    auto decode_one = [&](llama_token token) -> bool {
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        return llama_decode(engine->ctx, batch) == 0;
+    };
+
+    for (int32_t i = 0; i < effective_max_tokens; ++i) {
         if (engine->cancel.load()) {
             result = -2;
             break;
+        }
+
+        // Once the reasoning budget is exhausted, force `</think>` into the
+        // context so the model has to start the final answer.
+        if (inside_thinking && reasoning_tokens >= max_reasoning_tokens) {
+            const std::string closing = "\n</think>\n";
+            const std::vector<llama_token> close_tokens =
+                    tokenize_text(engine->vocab, closing, false);
+            bool failed = false;
+            for (llama_token close_token : close_tokens) {
+                std::string text;
+                token_to_text(close_token, text);
+                const int emit = emit_text(text);
+                if (emit <= 0) {
+                    result = emit == 0 ? -2 : -1;
+                    failed = true;
+                    break;
+                }
+                if (!decode_one(close_token)) {
+                    LOGE("llama_decode failed while closing the think block");
+                    throw_illegal_state(env, "llama_decode failed while closing the think block");
+                    result = -1;
+                    failed = true;
+                    break;
+                }
+                generated++;
+            }
+            if (failed) {
+                break;
+            }
+            inside_thinking = false;
+            think_tail.clear();
+            continue;
         }
 
         const llama_token token = llama_sampler_sample(sampler, engine->ctx, -1);
@@ -379,51 +465,31 @@ Java_com_example_model_internal_LlamaBridge_nativeGenerate(
             break;
         }
 
-        int32_t n_piece = llama_token_to_piece(
-                engine->vocab, token, piece, static_cast<int32_t>(sizeof(piece)), 0, false);
-        if (n_piece < 0) {
-            std::vector<char> big(static_cast<size_t>(-n_piece));
-            n_piece = llama_token_to_piece(
-                    engine->vocab, token, big.data(), static_cast<int32_t>(big.size()), 0, false);
-            if (n_piece > 0) {
-                piece[0] = '\0';
-                jbyteArray bytes = env->NewByteArray(n_piece);
-                env->SetByteArrayRegion(bytes, 0, n_piece,
-                                        reinterpret_cast<const jbyte *>(big.data()));
-                const jboolean keep_going = env->CallBooleanMethod(callback, on_token, bytes);
-                env->DeleteLocalRef(bytes);
-                if (env->ExceptionCheck()) {
-                    env->ExceptionDescribe();
-                    env->ExceptionClear();
-                    result = -1;
-                    break;
-                }
-                if (!keep_going) {
-                    result = -2;
-                    break;
-                }
-            }
-        } else if (n_piece > 0) {
-            jbyteArray bytes = env->NewByteArray(n_piece);
-            env->SetByteArrayRegion(bytes, 0, n_piece, reinterpret_cast<const jbyte *>(piece));
-            const jboolean keep_going = env->CallBooleanMethod(callback, on_token, bytes);
-            env->DeleteLocalRef(bytes);
-            if (env->ExceptionCheck()) {
-                env->ExceptionDescribe();
-                env->ExceptionClear();
-                result = -1;
+        std::string text;
+        token_to_text(token, text);
+        if (!text.empty()) {
+            const int emit = emit_text(text);
+            if (emit <= 0) {
+                result = emit == 0 ? -2 : -1;
                 break;
             }
-            if (!keep_going) {
-                result = -2;
-                break;
+            if (inside_thinking) {
+                think_tail += text;
+                if (think_tail.find("</think>") != std::string::npos) {
+                    inside_thinking = false;
+                    think_tail.clear();
+                } else if (think_tail.size() > 32) {
+                    think_tail.erase(0, think_tail.size() - 32);
+                }
             }
         }
 
+        if (inside_thinking) {
+            reasoning_tokens++;
+        }
         generated++;
 
-        llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
-        if (llama_decode(engine->ctx, batch) != 0) {
+        if (!decode_one(token)) {
             LOGE("llama_decode failed during generation");
             throw_illegal_state(env, "llama_decode failed during generation");
             result = -1;

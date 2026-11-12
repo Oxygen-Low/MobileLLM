@@ -28,7 +28,7 @@ class PromptFormatTest {
         assertTrue(prompt.contains("</think> Solution section. In the Thought"))
         assertTrue(
             prompt.endsWith(
-                "\n\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
+                "\n\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n"
             )
         )
     }

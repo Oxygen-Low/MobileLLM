@@ -2,6 +2,8 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,7 +23,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -74,16 +75,6 @@ fun ChatInputBar(
     val canSend = text.isNotBlank() && !isGenerating
 
     var plusMenuExpanded by remember { mutableStateOf(false) }
-    var reasoningMenuExpanded by remember { mutableStateOf(false) }
-
-    val reasoningTint = when {
-        !reasoningSupported -> TextMuted
-        reasoningLevel == ReasoningLevel.NONE -> TextMuted
-        reasoningLevel == ReasoningLevel.LOW -> TextSecondary
-        reasoningLevel == ReasoningLevel.MEDIUM -> GptEmerald
-        else -> ReasoningAmber
-    }
-    val reasoningActive = reasoningSupported && reasoningLevel != ReasoningLevel.NONE
 
     Surface(
         modifier = modifier
@@ -97,6 +88,61 @@ fun ChatInputBar(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
+            // Compact segmented control: None / Low / Medium / High / Max.
+            if (reasoningSupported) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 2.dp, end = 2.dp, bottom = 8.dp)
+                        .testTag("reasoning_selector"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Text(
+                        text = "Reasoning",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    )
+
+                    ReasoningLevel.entries.forEach { level ->
+                        val selected = level == reasoningLevel
+                        val tint = when (level) {
+                            ReasoningLevel.NONE -> TextMuted
+                            ReasoningLevel.LOW -> TextSecondary
+                            ReasoningLevel.MEDIUM -> GptEmerald
+                            ReasoningLevel.HIGH, ReasoningLevel.MAX -> ReasoningAmber
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (selected) tint.copy(alpha = 0.18f)
+                                    else SurfaceDark.copy(alpha = 0.55f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (selected) tint.copy(alpha = 0.65f) else BorderSubtle,
+                                    RoundedCornerShape(50)
+                                )
+                                .clickable { onSelectReasoningLevel(level) }
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                                .testTag("reasoning_option_${level.name.lowercase()}")
+                        ) {
+                            Text(
+                                text = level.shortLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (selected) tint else TextSecondary,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
             // Modern Floating Input Container with [+] Tools Menu, TextField & Send/Stop Button
             Row(
                 modifier = Modifier
@@ -180,106 +226,6 @@ fun ChatInputBar(
                             },
                             modifier = Modifier.testTag("web_search_toggle")
                         )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Reasoning effort selector. Uses the model's native /think
-                // switch plus level-specific prompt guidance and token budget.
-                Box {
-                    IconButton(
-                        onClick = {
-                            if (reasoningSupported) reasoningMenuExpanded = true
-                        },
-                        enabled = reasoningSupported,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (reasoningActive) reasoningTint.copy(alpha = 0.18f)
-                                else SurfaceDark.copy(alpha = 0.6f)
-                            )
-                            .testTag("reasoning_menu_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Psychology,
-                            contentDescription = "Reasoning effort: ${reasoningLevel.label}",
-                            tint = reasoningTint,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = reasoningMenuExpanded,
-                        onDismissRequest = { reasoningMenuExpanded = false },
-                        modifier = Modifier
-                            .background(SurfaceElevated)
-                            .border(0.5.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                    ) {
-                        Text(
-                            text = "Reasoning effort",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = TextMuted,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.sp
-                            ),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-
-                        ReasoningLevel.entries.forEach { level ->
-                                val selected = level == reasoningLevel
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = level.label,
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                                        color = if (selected) GptEmerald else TextPrimary
-                                                    )
-                                                )
-                                                if (selected) {
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = "Selected",
-                                                        tint = GptEmerald,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = level.description,
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    color = if (selected) GptEmerald else TextMuted,
-                                                    fontSize = 11.sp
-                                                )
-                                            )
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Psychology,
-                                            contentDescription = null,
-                                            tint = when {
-                                                selected -> GptEmerald
-                                                level == ReasoningLevel.NONE -> TextMuted
-                                                level == ReasoningLevel.LOW -> TextSecondary
-                                                level == ReasoningLevel.MEDIUM -> GptEmerald
-                                                else -> ReasoningAmber
-                                            },
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    },
-                                    onClick = {
-                                        onSelectReasoningLevel(level)
-                                        reasoningMenuExpanded = false
-                                    },
-                                    modifier = Modifier.testTag("reasoning_option_${level.name.lowercase()}")
-                                )
-                            }
                     }
                 }
 

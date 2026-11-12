@@ -29,6 +29,21 @@ object PromptFormat {
     private const val NO_THINK_SYSTEM =
         "You are a helpful AI assistant named SmolLM, trained by Hugging Face."
 
+    /**
+     * Resolves the final reasoning mode, honouring explicit `/think` and
+     * `/no_think` markers in [system] before falling back to the UI choice.
+     */
+    fun resolveReasoningMode(
+        system: String,
+        enableThinking: Boolean,
+        reasoningLevel: ReasoningLevel
+    ): String = when {
+        system.contains("/no_think") -> "/no_think"
+        system.contains("/think") -> "/think"
+        enableThinking && reasoningLevel.usesThinking -> "/think"
+        else -> "/no_think"
+    }
+
     fun smolLM3(
         system: String,
         turns: List<Turn>,
@@ -37,14 +52,7 @@ object PromptFormat {
         reasoningLevel: ReasoningLevel =
             if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
     ): String {
-        var reasoningMode = if (enableThinking) "/think" else "/no_think"
-        if (system.contains("/no_think")) {
-            reasoningMode = "/no_think"
-        } else if (system.contains("/think")) {
-            reasoningMode = "/think"
-        } else if (!reasoningLevel.usesThinking) {
-            reasoningMode = "/no_think"
-        }
+        val reasoningMode = resolveReasoningMode(system, enableThinking, reasoningLevel)
 
         val customInstructions = system
             .replace("/no_think", "")
@@ -92,6 +100,10 @@ object PromptFormat {
         prompt.append("<|im_start|>assistant\n")
         if (reasoningMode == "/no_think") {
             prompt.append("<think>\n\n</think>\n")
+        } else {
+            // Prefill the opening tag so the model is forced to continue inside
+            // a reasoning block instead of silently skipping the think phase.
+            prompt.append("<think>\n")
         }
 
         return prompt.toString()
