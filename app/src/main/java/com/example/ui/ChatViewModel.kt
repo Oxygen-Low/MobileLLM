@@ -7,6 +7,7 @@ import com.example.data.AppDatabase
 import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
 import com.example.data.ChatSessionEntity
+import com.example.data.ChatTranscript
 import com.example.model.DownloadProgressInfo
 import com.example.model.GenerationEvent
 import com.example.model.ModelDownloadManager
@@ -81,6 +82,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val activeToolName = MutableStateFlow<String?>(null)
     val activeToolQuery = MutableStateFlow<String?>(null)
     val activeToolSourceUrl = MutableStateFlow<String?>(null)
+
+    // Id of the assistant reply that has been written to the database for the
+    // current turn. The UI keeps the live streaming bubble on screen until
+    // this reply is actually part of the transcript, so the finished answer
+    // is swapped in instead of blinking out for a frame.
+    private val _persistedReplyId = MutableStateFlow<String?>(null)
+    val persistedReplyId: StateFlow<String?> = _persistedReplyId.asStateFlow()
+
+    /**
+     * Drops the live streaming state.
+     *
+     * The streaming bubble is rendered from these buffers, so they have to be
+     * cleared whenever the transcript is rewritten behind the user's back (a
+     * rewind) or a new turn starts - otherwise a stale bubble can reappear.
+     */
+    private fun clearStreamingState() {
+        _persistedReplyId.value = null
+        streamingReasoning.value = ""
+        streamingContent.value = ""
+        activeToolName.value = null
+        activeToolQuery.value = null
+        activeToolSourceUrl.value = null
+    }
 
     // Queued prompt if user submitted while downloading
     private var pendingPrompt: String? = null
@@ -314,6 +338,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             title = "New Chat",
             modelId = selectedModel.value.shortName
         )
+        clearStreamingState()
         viewModelScope.launch {
             repository.createSession(session)
             _currentSessionId.value = newId
@@ -321,6 +346,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun switchSession(sessionId: String) {
+        // The streaming bubble belongs to the transcript it was streamed into;
+        // carrying it over would show it in a chat it never belonged to.
+        clearStreamingState()
         _currentSessionId.value = sessionId
     }
 
@@ -328,12 +356,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteSession(sessionId)
             if (_currentSessionId.value == sessionId) {
+                clearStreamingState()
                 _currentSessionId.value = null
             }
         }
     }
 
     fun clearAllSessions() {
+        clearStreamingState()
         viewModelScope.launch {
             repository.clearAll()
             _currentSessionId.value = null
@@ -341,7 +371,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendMessage(promptText: String) {
-        if (promptText.isBlank() || _isGenerating.value) return
+        if (promptText.isBlank() || isGenerationRunning()) return
         onUserActivity()
 
         val model = selectedModel.value
@@ -398,12 +428,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             repository.insertMessage(userMsg)
 
             // 2. Prepare streaming state
+            clearStreamingState()
             _isGenerating.value = true
-            streamingReasoning.value = ""
-            streamingContent.value = ""
-            activeToolName.value = null
-            activeToolQuery.value = null
-            activeToolSourceUrl.value = null
 
             var recordedTps = 0.0
             var recordedTokens = 0
@@ -462,34 +488,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 finalContent = streamingContent.value.ifEmpty { "Generation interrupted: ${e.message}" }
             } finally {
-                _isGenerating.value = false
+                try {
+                    // 4. Save Assistant Message into Room
+                    val assistantMsg = ChatMessageEntity(
+                        id = UUID.randomUUID().toString(),
+                        sessionId = activeSessionId,
+                        role = "assistant",
+                        content = if (finalContent.isNotEmpty()) finalContent else streamingContent.value,
+                        reasoningContent = if (finalThinking.isNotEmpty()) finalThinking else streamingReasoning.value.ifBlank { null },
+                        tokensCount = recordedTokens,
+                        tokensPerSecond = recordedTps,
+                        isToolExecution = activeToolName.value != null,
+                        toolName = activeToolName.value,
+                        toolQuery = activeToolQuery.value,
+                        toolSourceUrl = activeToolSourceUrl.value
+                    )
+                    repository.insertMessage(assistantMsg)
 
-                // 4. Save Assistant Message into Room
-                val assistantMsg = ChatMessageEntity(
-                    id = UUID.randomUUID().toString(),
-                    sessionId = activeSessionId,
-                    role = "assistant",
-                    content = if (finalContent.isNotEmpty()) finalContent else streamingContent.value,
-                    reasoningContent = if (finalThinking.isNotEmpty()) finalThinking else streamingReasoning.value.ifBlank { null },
-                    tokensCount = recordedTokens,
-                    tokensPerSecond = recordedTps,
-                    isToolExecution = activeToolName.value != null,
-                    toolName = activeToolName.value,
-                    toolQuery = activeToolQuery.value,
-                    toolSourceUrl = activeToolSourceUrl.value
-                )
-                repository.insertMessage(assistantMsg)
+                    // The reply is part of the transcript now. Publishing its id
+                    // lets the UI swap the live streaming bubble for it in one
+                    // step instead of blinking out between the two.
+                    _persistedReplyId.value = assistantMsg.id
+                } finally {
+                    _isGenerating.value = false
 
-                // Clear streaming buffers
-                streamingReasoning.value = ""
-                streamingContent.value = ""
-                activeToolName.value = null
-                activeToolQuery.value = null
-                activeToolSourceUrl.value = null
+                    // The streaming buffers are deliberately kept: the bubble
+                    // renders from them and stays on screen until the persisted
+                    // reply has replaced it. A turn that never made it into the
+                    // transcript has nothing to hand over to, so it is dropped.
+                    if (_persistedReplyId.value == null) {
+                        clearStreamingState()
+                    }
 
-                // Restart the idle countdown once the engine is free again.
-                if (modelEngineManager.loadState.value == ModelLoadState.LOADED) {
-                    scheduleInactivityUnload()
+                    // Restart the idle countdown once the engine is free again.
+                    if (modelEngineManager.loadState.value == ModelLoadState.LOADED) {
+                        scheduleInactivityUnload()
+                    }
                 }
             }
         }
@@ -533,7 +567,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * assistant response that has a user prompt before it.
      */
     fun regenerateLastResponse() {
-        if (_isGenerating.value) return
+        if (isGenerationRunning()) return
 
         val model = selectedModel.value
         if (!model.isReadyToLoad) return
@@ -543,25 +577,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val transcript = repository.getMessagesForSession(sessionId).first()
-            val lastIndex = transcript.lastIndex
-            val lastMessage = transcript.getOrNull(lastIndex) ?: return@launch
-            if (lastMessage.role != "assistant") return@launch
 
-            val lastUserIndex = (lastIndex - 1 downTo 0)
-                .indexOfFirst { transcript[it].role == "user" }
-            if (lastUserIndex < 0) return@launch
+            // The prompt that produced the reply we are replacing. It has to be
+            // the *last* user turn, not the first one in the session - the old
+            // code took the position of the match inside a descending range,
+            // which pointed at an unrelated turn and replayed the wrong prompt.
+            val target = ChatTranscript.regenerationTarget(transcript) ?: return@launch
+
+            // The transcript is about to be rewritten - drop the streaming state
+            // so a stale bubble cannot reappear over the new turn.
+            clearStreamingState()
 
             // Drop the reply and its prompt; executePromptStream re-inserts the
             // prompt as a fresh user turn before generating the new reply.
             repository.deleteMessagesByIds(
-                listOf(transcript[lastUserIndex].id, lastMessage.id)
+                listOf(
+                    transcript[target.promptIndex].id,
+                    transcript[target.replyIndex].id
+                )
             )
 
             if (modelEngineManager.loadState.value != ModelLoadState.LOADED) {
                 val file = downloadManager.getModelFile(model.id)
                 modelEngineManager.loadModel(model, file)
             }
-            executePromptStream(transcript[lastUserIndex].content, model)
+            executePromptStream(transcript[target.promptIndex].content, model)
         }
     }
 
@@ -570,20 +610,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * every message that came after it.
      */
     fun rewindToMessage(messageId: String) {
-        if (_isGenerating.value) return
+        if (isGenerationRunning()) return
 
         val sessionId = _currentSessionId.value ?: return
 
         viewModelScope.launch {
             val transcript = repository.getMessagesForSession(sessionId).first()
-            val index = transcript.indexOfFirst { it.id == messageId }
-            if (index < 0 || index == transcript.lastIndex) return@launch
+            val index = ChatTranscript.rewindAnchorIndex(transcript, messageId)
+            if (index < 0) return@launch
+
+            // The transcript is about to lose the messages the live bubble was
+            // showing - drop it so nothing stale is left behind.
+            clearStreamingState()
 
             repository.deleteMessagesByIds(
-                transcript.drop(index + 1).map { it.id }
+                ChatTranscript.idsAfter(transcript, index)
             )
         }
     }
+
+    /**
+     * True while a generation owns the transcript.
+     *
+     * The job is checked as well as the flag: `_isGenerating` is only flipped
+     * inside the generation coroutine, so there is a window right after a
+     * prompt is submitted where the flag still reads false while the job is
+     * already running. Rewinding during that window would delete messages the
+     * running generation is about to write.
+     */
+    private fun isGenerationRunning(): Boolean =
+        _isGenerating.value || generationJob?.isActive == true
 
     override fun onCleared() {
         super.onCleared()
