@@ -27,6 +27,7 @@ import com.example.model.SpeechEngineState
 import com.example.model.StoredTurn
 import com.example.tools.MCPToolExecutor
 import com.example.update.UpdateManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -74,7 +75,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val ttsError: StateFlow<String?> = speechEngineManager.ttsError
     val isListening: StateFlow<Boolean> = speechRecorder.isRecording
     val isTranscribing: StateFlow<Boolean> = speechEngineManager.isTranscribing
-    val isSpeaking: StateFlow<Boolean> = speechPlayer.isSpeaking
 
     private val _speechError = MutableStateFlow<String?>(null)
     val speechError: StateFlow<String?> = _speechError.asStateFlow()
@@ -86,11 +86,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _transcribedText = MutableStateFlow<String?>(null)
     val transcribedText: StateFlow<String?> = _transcribedText.asStateFlow()
 
+    /**
+     * The reply currently being read. The automatic reader uses it to drop a
+     * callback when a newer reply has taken over.
+     */
     private val _speakingMessageId = MutableStateFlow<String?>(null)
-    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
-
-    private val _synthesizingMessageId = MutableStateFlow<String?>(null)
-    val synthesizingMessageId: StateFlow<String?> = _synthesizingMessageId.asStateFlow()
 
     private var speechJob: Job? = null
     private var dictationJob: Job? = null
@@ -477,7 +477,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         dictationJob = viewModelScope.launch {
             val samples = speechRecorder.stop()
-            if (samples.isEmpty()) {
+            if (samples.size < MIN_TRANSCRIBE_SAMPLES) {
+                _speechError.value = "Recording was too short"
                 scheduleInactivityUnload()
                 return@launch
             }
@@ -485,7 +486,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (text.isNotBlank()) {
                 _transcribedText.value = text
             } else if (sttState.value == SpeechEngineState.READY) {
-                _speechError.value = "No speech detected"
+                _speechError.value = "No speech detected, try speaking closer to the microphone"
             }
             scheduleInactivityUnload()
         }
@@ -505,29 +506,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         speechEngineManager.clearErrors()
     }
 
-    /** Speaks an assistant reply, or stops it when it is already speaking. */
-    fun toggleSpeakMessage(messageId: String, text: String) {
-        if (!ttsEnabled.value) return
-        if (_speakingMessageId.value == messageId || _synthesizingMessageId.value == messageId) {
-            stopSpeaking()
-            return
-        }
+    /**
+     * Reads an assistant reply aloud. Called automatically when a reply
+     * finishes if Text to Speech is on; a new generation stops whatever was
+     * playing first.
+     */
+    fun speakReply(messageId: String, text: String) {
+        if (!ttsEnabled.value || text.isBlank()) return
 
         stopSpeaking()
         speechJob = viewModelScope.launch {
-            _synthesizingMessageId.value = messageId
+            _speakingMessageId.value = messageId
             val audio = speechEngineManager.synthesize(text)
-            if (_synthesizingMessageId.value != messageId) return@launch
-            _synthesizingMessageId.value = null
+            if (_speakingMessageId.value != messageId) return@launch
 
             if (audio == null) {
+                _speakingMessageId.value = null
                 _speechError.value = speechEngineManager.ttsError.value
                     ?: "Could not synthesize this reply"
                 scheduleInactivityUnload()
                 return@launch
             }
 
-            _speakingMessageId.value = messageId
             speechPlayer.play(audio.samples, audio.sampleRate) {
                 if (_speakingMessageId.value == messageId) {
                     _speakingMessageId.value = null
@@ -544,10 +544,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         speechJob = null
         speechPlayer.stop()
         _speakingMessageId.value = null
-        _synthesizingMessageId.value = null
     }
 
     fun createNewSession() {
+        stopSpeaking()
         val newId = UUID.randomUUID().toString()
         val session = ChatSessionEntity(
             id = newId,
@@ -564,6 +564,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun switchSession(sessionId: String) {
         // The streaming bubble belongs to the transcript it was streamed into;
         // carrying it over would show it in a chat it never belonged to.
+        stopSpeaking()
         clearStreamingState()
         _currentSessionId.value = sessionId
     }
@@ -647,6 +648,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // 2. Prepare streaming state
             clearStreamingState()
             _isGenerating.value = true
+            stopSpeaking()
+            var interrupted = false
 
             // The id of the reply is known up front: the tool steps of this turn
             // are numbered relative to it, so a live step and the transcript
@@ -731,6 +734,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                // The user stopped the turn; there is no reply worth reading.
+                interrupted = true
+                throw e
             } catch (e: Exception) {
                 finalContent = streamingContent.value.ifEmpty { "Generation interrupted: ${e.message}" }
             } finally {
@@ -772,6 +779,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     // lets the UI swap the live streaming bubble for it in one
                     // step instead of blinking out between the two.
                     _persistedReplyId.value = assistantMsg.id
+
+                    // Text to Speech reads every finished reply aloud when it
+                    // is enabled. Errors and interrupted turns are not read.
+                    val replyText = assistantMsg.content
+                    if (!interrupted && ttsEnabled.value && replyText.isNotBlank() &&
+                        !replyText.startsWith("Error:") && !replyText.startsWith("Generation interrupted")
+                    ) {
+                        speakReply(assistantMsg.id, replyText)
+                    }
                 } finally {
                     _isGenerating.value = false
 
@@ -864,6 +880,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun stopGeneration() {
         generationJob?.cancel()
         _isGenerating.value = false
+        stopSpeaking()
     }
 
     /**
@@ -915,6 +932,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun rewindToMessage(messageId: String) {
         if (isGenerationRunning()) return
+        stopSpeaking()
 
         val sessionId = _currentSessionId.value ?: return
 
@@ -957,5 +975,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         const val INACTIVITY_TIMEOUT_MS = 30_000L
         const val ACTIVITY_RESET_THROTTLE_MS = 500L
         const val UPDATE_CHECK_INTERVAL_MS = 60_000L
+
+        /** Quarter of a second of audio, the shortest Whisper can use. */
+        const val MIN_TRANSCRIBE_SAMPLES = 16_000 / 4
     }
 }

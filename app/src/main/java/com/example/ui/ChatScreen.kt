@@ -115,8 +115,6 @@ fun ChatScreen(
     val speechError by viewModel.speechError.collectAsStateWithLifecycle()
     val isListening by viewModel.isListening.collectAsStateWithLifecycle()
     val isTranscribing by viewModel.isTranscribing.collectAsStateWithLifecycle()
-    val speakingMessageId by viewModel.speakingMessageId.collectAsStateWithLifecycle()
-    val synthesizingMessageId by viewModel.synthesizingMessageId.collectAsStateWithLifecycle()
     val transcribedText by viewModel.transcribedText.collectAsStateWithLifecycle()
 
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
@@ -471,12 +469,8 @@ fun ChatScreen(
                             // hidden while a reply is being streamed.
                             showRewind = !isGenerating && message.role == "assistant" && !isLastMessage,
                             showRegenerate = !isGenerating && message.role == "assistant" && isLastMessage,
-                            ttsEnabled = ttsEnabled && message.role == "assistant" && message.content.isNotBlank(),
-                            isSpeaking = speakingMessageId == message.id,
-                            isSynthesizing = synthesizingMessageId == message.id,
                             onRewind = { viewModel.rewindToMessage(message.id) },
-                            onRegenerate = { viewModel.regenerateLastResponse() },
-                            onSpeak = { viewModel.toggleSpeakMessage(message.id, message.content) }
+                            onRegenerate = { viewModel.regenerateLastResponse() }
                         )
                     }
 

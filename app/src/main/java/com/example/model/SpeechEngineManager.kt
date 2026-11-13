@@ -323,7 +323,7 @@ class SpeechEngineManager(
      */
     suspend fun synthesize(text: String): SpeechAudio? {
         if (!_ttsEnabled.value) return null
-        val spoken = textForSpeech(text)
+        val spoken = SpeechTextNormalizer.clean(text)
         if (spoken.isBlank()) return null
 
         ensureTtsReady()
@@ -375,24 +375,8 @@ class SpeechEngineManager(
             else -> SpeechEngineState.NOT_DOWNLOADED
         }
 
-    private fun textForSpeech(raw: String): String {
-        var text = raw
-            .replace(Regex("```[\\s\\S]*?```"), " Code block. ")
-            .replace(Regex("`([^`]*)`"), "$1")
-            .replace(Regex("!\\[[^]]*]\\([^)]*\\)"), "")
-            .replace(Regex("\\[([^]]*)]\\([^)]*\\)"), "$1")
-            .replace(Regex("[*_#>]+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        if (text.length > MAX_TTS_CHARS) {
-            text = text.take(MAX_TTS_CHARS)
-        }
-        return text
-    }
-
     private companion object {
         const val TAG = "SpeechEngineManager"
         const val SAMPLE_RATE = 16_000
-        const val MAX_TTS_CHARS = 2_000
     }
 }

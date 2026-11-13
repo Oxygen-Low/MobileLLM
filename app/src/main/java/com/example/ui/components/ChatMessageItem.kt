@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
@@ -35,7 +34,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -82,12 +80,8 @@ fun ChatMessageItem(
     showRewind: Boolean = false,
     showRegenerate: Boolean = false,
     showThinkingPlaceholder: Boolean = true,
-    ttsEnabled: Boolean = false,
-    isSpeaking: Boolean = false,
-    isSynthesizing: Boolean = false,
     onRewind: () -> Unit = {},
-    onRegenerate: () -> Unit = {},
-    onSpeak: () -> Unit = {}
+    onRegenerate: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isUser = message.role == "user"
@@ -215,36 +209,8 @@ fun ChatMessageItem(
                                 }
                             }
 
-                            // Right: Minimal action icons (Speak, Rewind, Regenerate, Copy)
+                            // Right: Minimal action icons (Rewind, Regenerate, Copy)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-
-                                if (ttsEnabled) {
-                                    IconButton(
-                                        onClick = onSpeak,
-                                        modifier = Modifier
-                                            .size(30.dp)
-                                            .testTag("speak_button_${message.id}")
-                                    ) {
-                                        if (isSynthesizing) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(13.dp),
-                                                strokeWidth = 1.5.dp,
-                                                color = TelemetryCyan
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                                contentDescription = if (isSpeaking) {
-                                                    "Stop reading"
-                                                } else {
-                                                    "Read aloud"
-                                                },
-                                                tint = if (isSpeaking) BrandEmerald else TextMuted,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-                                }
 
                                 if (showRewind) {
                                     IconButton(

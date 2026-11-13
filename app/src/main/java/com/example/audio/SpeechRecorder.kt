@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -83,6 +85,10 @@ class SpeechRecorder(private val context: Context) {
                         }
                     } else if (read < 0) {
                         break
+                    } else {
+                        // The device had no samples ready. Yield instead of
+                        // spinning while the buffer refills.
+                        yield()
                     }
                 }
             } catch (t: Throwable) {
@@ -95,46 +101,55 @@ class SpeechRecorder(private val context: Context) {
     suspend fun stop(): FloatArray = withContext(Dispatchers.IO) {
         val active = recorder ?: return@withContext FloatArray(0)
         recorder = null
-
-        runCatching { active.stop() }
-        readJob?.join()
-        readJob = null
-        runCatching { active.release() }
         _isRecording.value = false
+
+        val job = readJob
+        readJob = null
+        runCatching { active.stop() }
+        // A stopped AudioRecord can answer read() with 0 forever, so the
+        // reader is cancelled first; stopping it is what unblocks the call.
+        job?.cancel()
+        withTimeoutOrNull(READ_STOP_TIMEOUT_MS) { job?.join() }
+        runCatching { active.release() }
 
         val bytes = synchronized(buffer) {
             buffer.toByteArray().also { buffer.reset() }
         }
-        pcm16ToFloat(bytes)
+        pcm16BytesToFloats(bytes)
     }
 
     /** Discards the current recording without producing samples. */
     suspend fun cancel() = withContext(Dispatchers.IO) {
         val active = recorder
         recorder = null
-        runCatching { active?.stop() }
-        readJob?.cancel()
+        _isRecording.value = false
+
+        val job = readJob
         readJob = null
+        runCatching { active?.stop() }
+        job?.cancel()
+        withTimeoutOrNull(READ_STOP_TIMEOUT_MS) { job?.join() }
         runCatching { active?.release() }
         synchronized(buffer) { buffer.reset() }
-        _isRecording.value = false
         Unit
     }
 
-    private fun pcm16ToFloat(bytes: ByteArray): FloatArray {
-        if (bytes.size < 2) return FloatArray(0)
-        val shorts = ShortArray(bytes.size / 2)
-        ByteBuffer.wrap(bytes)
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .asShortBuffer()
-            .get(shorts)
-        return FloatArray(shorts.size) { shorts[it] / 32768f }
-    }
-
-    private companion object {
+    internal companion object {
         const val TAG = "SpeechRecorder"
         const val SAMPLE_RATE = 16_000
         const val MAX_SECONDS = 120
         const val MAX_BYTES = SAMPLE_RATE * 2 * MAX_SECONDS
+        const val READ_STOP_TIMEOUT_MS = 1_000L
+
+        /** Turns little-endian 16-bit PCM into the [-1, 1] samples Whisper wants. */
+        internal fun pcm16BytesToFloats(bytes: ByteArray): FloatArray {
+            if (bytes.size < 2) return FloatArray(0)
+            val shorts = ShortArray(bytes.size / 2)
+            ByteBuffer.wrap(bytes)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .asShortBuffer()
+                .get(shorts)
+            return FloatArray(shorts.size) { shorts[it] / 32768f }
+        }
     }
 }
