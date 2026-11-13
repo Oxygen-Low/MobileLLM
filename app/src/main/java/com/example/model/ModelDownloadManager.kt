@@ -11,8 +11,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
@@ -45,10 +50,18 @@ class ModelDownloadManager(
 ) {
     val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
 
+    /** Speech models are directories, so they live next to the GGUF files. */
+    val speechDir = File(context.filesDir, "speech").apply { mkdirs() }
+
     private val _downloadStates = MutableStateFlow<Map<String, DownloadProgressInfo>>(emptyMap())
     val downloadStates: StateFlow<Map<String, DownloadProgressInfo>> = _downloadStates.asStateFlow()
 
     fun getModelFile(modelId: String): File = File(modelsDir, "$modelId.gguf")
+
+    fun getSpeechModelDir(modelId: String): File = File(speechDir, modelId)
+
+    fun isSpeechModelDownloaded(model: SpeechModelProfile): Boolean =
+        model.isReady(speechDir)
 
     fun isModelDownloaded(modelId: String): Boolean {
         val file = getModelFile(modelId)
@@ -133,6 +146,184 @@ class ModelDownloadManager(
             state = ModelDownloadState.ERROR,
             error = lastError ?: "Could not download the model from any mirror"
         )
+    }
+
+    /**
+     * Downloads and unpacks a small speech model. The archive is kept around
+     * until extraction succeeds, so a failed unpack can be retried without
+     * transferring the weights again.
+     */
+    suspend fun startSpeechDownload(
+        profile: SpeechModelProfile,
+        onComplete: (File) -> Unit = {}
+    ) = withContext(Dispatchers.IO) {
+        val target = getSpeechModelDir(profile.id)
+        if (profile.isReady(speechDir)) {
+            publish(
+                modelId = profile.id,
+                progress = 1f,
+                downloadedBytes = 0f,
+                totalBytes = 0f,
+                speedMbps = 0f,
+                state = ModelDownloadState.DOWNLOADED
+            )
+            onComplete(target)
+            return@withContext
+        }
+
+        val archive = File(speechDir, "${profile.id}.tar.bz2")
+        val part = File(speechDir, "${profile.id}.tar.bz2.part")
+        val expectedBytes = profile.downloadSizeMb.toLong() * 1024L * 1024L
+
+        try {
+            if (!archive.isFile || archive.length() == 0L) {
+                Log.i(TAG, "Downloading speech model ${profile.id} from ${profile.archiveUrl}")
+                if (!downloadFrom(
+                        url = profile.archiveUrl,
+                        part = part,
+                        expectedBytes = expectedBytes,
+                        modelId = profile.id,
+                        totalMb = profile.downloadSizeMb
+                    )
+                ) {
+                    publish(
+                        modelId = profile.id,
+                        progress = 0f,
+                        downloadedBytes = 0f,
+                        totalBytes = expectedBytes.toFloat(),
+                        speedMbps = 0f,
+                        state = ModelDownloadState.ERROR,
+                        error = "Could not download ${profile.name}"
+                    )
+                    return@withContext
+                }
+
+                if (archive.exists() && !archive.delete()) {
+                    throw IOException("Could not replace ${archive.name}")
+                }
+                if (!part.renameTo(archive)) {
+                    throw IOException("Could not move the downloaded speech archive into place")
+                }
+            }
+
+            publish(
+                modelId = profile.id,
+                progress = 0.99f,
+                downloadedBytes = archive.length().toFloat(),
+                totalBytes = archive.length().toFloat(),
+                speedMbps = 0f,
+                state = ModelDownloadState.DOWNLOADING
+            )
+
+            extractSpeechArchive(archive, profile)
+            archive.delete()
+
+            if (profile.isReady(speechDir)) {
+                publish(
+                    modelId = profile.id,
+                    progress = 1f,
+                    downloadedBytes = 0f,
+                    totalBytes = 0f,
+                    speedMbps = 0f,
+                    state = ModelDownloadState.DOWNLOADED
+                )
+                Log.i(TAG, "Speech model ${profile.id} ready")
+                onComplete(target)
+            } else {
+                publish(
+                    modelId = profile.id,
+                    progress = 0f,
+                    downloadedBytes = 0f,
+                    totalBytes = 0f,
+                    speedMbps = 0f,
+                    state = ModelDownloadState.ERROR,
+                    error = "The speech archive is missing ${profile.name} files"
+                )
+            }
+        } catch (e: CancellationException) {
+            // Keep the .part file so the next attempt can resume.
+            publish(
+                modelId = profile.id,
+                progress = progressOf(part, expectedBytes),
+                downloadedBytes = part.length().toFloat(),
+                totalBytes = expectedBytes.toFloat(),
+                speedMbps = 0f,
+                state = ModelDownloadState.NOT_DOWNLOADED
+            )
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Speech model download failed", e)
+            publish(
+                modelId = profile.id,
+                progress = 0f,
+                downloadedBytes = 0f,
+                totalBytes = 0f,
+                speedMbps = 0f,
+                state = ModelDownloadState.ERROR,
+                error = e.message ?: "Could not install ${profile.name}"
+            )
+        }
+    }
+
+    /**
+     * Unpacks the tar.bz2 release into `speech/<id>`. Entries are checked
+     * against the extraction directory so a malicious archive cannot write
+     * outside of the app's private storage.
+     */
+    private fun extractSpeechArchive(archive: File, profile: SpeechModelProfile) {
+        val temp = File(speechDir, "${profile.id}.extracting")
+        temp.deleteRecursively()
+        if (!temp.mkdirs()) throw IOException("Could not create ${temp.name}")
+
+        val root = temp.canonicalFile
+        try {
+            TarArchiveInputStream(
+                BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archive)))
+            ).use { tar ->
+                var entry = tar.nextEntry
+                while (entry != null) {
+                    val output = File(temp, entry.name).canonicalFile
+                    if (!output.path.startsWith(root.path + File.separator) && output != root) {
+                        throw IOException("Unsafe path in speech archive: ${entry.name}")
+                    }
+
+                    if (entry.isDirectory) {
+                        output.mkdirs()
+                    } else {
+                        output.parentFile?.mkdirs()
+                        FileOutputStream(output).use { stream -> tar.copyTo(stream) }
+                    }
+                    entry = tar.nextEntry
+                }
+            }
+
+            val children = temp.listFiles().orEmpty()
+            val source = children.singleOrNull()?.takeIf { it.isDirectory } ?: temp
+
+            // Drop unquantised duplicates and sample audio that the runtime
+            // never reads; speech storage is scarce next to the LLM weights.
+            for (relative in profile.prunedFiles) {
+                File(source, relative).deleteRecursively()
+            }
+
+            val destination = getSpeechModelDir(profile.id)
+            destination.deleteRecursively()
+            if (!source.renameTo(destination)) {
+                source.copyRecursively(destination, overwrite = true)
+                source.deleteRecursively()
+            }
+        } finally {
+            temp.deleteRecursively()
+        }
+    }
+
+    fun deleteSpeechModel(modelId: String): Boolean {
+        val deleted = getSpeechModelDir(modelId).deleteRecursively()
+        File(speechDir, "$modelId.tar.bz2").delete()
+        File(speechDir, "$modelId.tar.bz2.part").delete()
+        File(speechDir, "$modelId.extracting").deleteRecursively()
+        _downloadStates.value = _downloadStates.value.toMutableMap().apply { remove(modelId) }
+        return deleted
     }
 
     /**

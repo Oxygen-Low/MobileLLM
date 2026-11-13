@@ -18,10 +18,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
@@ -35,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -51,6 +54,9 @@ import com.example.model.DownloadProgressInfo
 import com.example.model.ModelDownloadState
 import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
+import com.example.model.SpeechEngineState
+import com.example.model.SpeechModelKind
+import com.example.model.SpeechModelProfile
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
 import com.example.ui.theme.ErrorRed
@@ -71,6 +77,14 @@ fun ModelsHubSheet(
     currentModel: ModelProfile,
     loadState: ModelLoadState,
     downloadStates: Map<String, DownloadProgressInfo>,
+    sttEnabled: Boolean,
+    ttsEnabled: Boolean,
+    sttState: SpeechEngineState,
+    ttsState: SpeechEngineState,
+    sttError: String?,
+    ttsError: String?,
+    onToggleStt: (Boolean) -> Unit,
+    onToggleTts: (Boolean) -> Unit,
     onSelectAndLoadModel: (ModelProfile) -> Unit,
     onUnloadModel: () -> Unit,
     onDownloadModel: (ModelProfile) -> Unit,
@@ -147,25 +161,50 @@ fun ModelsHubSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            Text(
-                text = "AVAILABLE LOCAL WEIGHTS",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
-                ),
-                color = TextMuted
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Models List
+            // Models and speech engines share one scroll area.
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                item(key = "speech_header") {
+                    SectionHeader("ON-DEVICE SPEECH")
+                }
+
+                item(key = "speech_stt") {
+                    SpeechFeatureCard(
+                        title = "Speech to Text",
+                        subtitle = "Whisper Tiny (int8) • offline dictation",
+                        model = SpeechModelProfile.WHISPER_TINY,
+                        enabled = sttEnabled,
+                        state = sttState,
+                        error = sttError,
+                        downloadInfo = downloadStates[SpeechModelProfile.WHISPER_TINY.id],
+                        onToggle = onToggleStt
+                    )
+                }
+
+                item(key = "speech_tts") {
+                    SpeechFeatureCard(
+                        title = "Text to Speech",
+                        subtitle = "Piper Amy (int8) • offline read-aloud",
+                        model = SpeechModelProfile.PIPER_AMY_LOW,
+                        enabled = ttsEnabled,
+                        state = ttsState,
+                        error = ttsError,
+                        downloadInfo = downloadStates[SpeechModelProfile.PIPER_AMY_LOW.id],
+                        onToggle = onToggleTts
+                    )
+                }
+
+                item(key = "models_header") {
+                    Column {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        SectionHeader("AVAILABLE LOCAL WEIGHTS")
+                    }
+                }
+
                 items(models, key = { it.id }) { model ->
                     val downloadInfo = downloadStates[model.id]
                     val isDownloaded = model.downloadState == ModelDownloadState.DOWNLOADED ||
@@ -195,6 +234,181 @@ fun ModelsHubSheet(
                         onDelete = { onDeleteModel(model.id) }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp
+        ),
+        color = TextMuted
+    )
+}
+
+/**
+ * One speech feature. The switch is the only thing that allocates or releases
+ * the engine; while it is on, the card reports download/load progress and the
+ * model is cached until the app goes idle.
+ */
+@Composable
+private fun SpeechFeatureCard(
+    title: String,
+    subtitle: String,
+    model: SpeechModelProfile,
+    enabled: Boolean,
+    state: SpeechEngineState,
+    error: String?,
+    downloadInfo: DownloadProgressInfo?,
+    onToggle: (Boolean) -> Unit
+) {
+    val activeDownload = downloadInfo?.takeIf { it.state == ModelDownloadState.DOWNLOADING }
+    val status = when (state) {
+        SpeechEngineState.DISABLED -> "Off • no memory or storage used"
+        SpeechEngineState.NOT_DOWNLOADED -> "Enabled • model not downloaded yet"
+        SpeechEngineState.DOWNLOADING -> "Downloading ${model.downloadSizeMb} MB…"
+        SpeechEngineState.LOADING -> "Loading into memory…"
+        SpeechEngineState.READY -> "Loaded • ready"
+        SpeechEngineState.UNLOADED -> "Released while idle • reloads on first use"
+        SpeechEngineState.ERROR -> "Error"
+    }
+    val statusColor = when (state) {
+        SpeechEngineState.READY -> TerminalGreen
+        SpeechEngineState.DOWNLOADING, SpeechEngineState.LOADING -> TelemetryCyan
+        SpeechEngineState.ERROR -> ErrorRed
+        else -> TextMuted
+    }
+    val icon = when (model.kind) {
+        SpeechModelKind.SPEECH_TO_TEXT -> Icons.Default.RecordVoiceOver
+        SpeechModelKind.TEXT_TO_SPEECH -> Icons.AutoMirrored.Filled.VolumeUp
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                1.dp,
+                if (enabled) TelemetryCyan.copy(alpha = 0.6f) else BorderSubtle,
+                RoundedCornerShape(12.dp)
+            )
+            .testTag("speech_card_${model.id}"),
+        color = if (enabled) CardHighlight else SurfaceElevated
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (enabled) TelemetryCyan.copy(alpha = 0.18f)
+                            else SurfaceDark.copy(alpha = 0.6f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (enabled) TelemetryCyan else TextMuted,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = if (enabled) TelemetryCyan else TextPrimary
+                        )
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.5.sp,
+                            color = TextSecondary
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onToggle,
+                    modifier = Modifier.testTag("speech_toggle_${model.id}")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp,
+                    color = statusColor
+                )
+            )
+
+            if (activeDownload != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { activeDownload.progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = TelemetryCyan,
+                    trackColor = BorderSubtle
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${(activeDownload.progress * 100).toInt()}% • ${activeDownload.downloadedMb.toInt()} / ${activeDownload.totalMb.toInt()} MB",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            color = TelemetryCyan,
+                            fontSize = 10.5.sp
+                        )
+                    )
+                    if (activeDownload.speedMbps > 0f) {
+                        Text(
+                            text = "${activeDownload.speedMbps} MB/s",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = TerminalGreen,
+                                fontSize = 10.5.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            val message = error ?: downloadInfo
+                ?.takeIf { it.state == ModelDownloadState.ERROR }
+                ?.error
+            if (message != null && state == SpeechEngineState.ERROR) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        color = ErrorRed
+                    )
+                )
             }
         }
     }

@@ -20,17 +20,15 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,9 +44,11 @@ import com.example.model.ReasoningLevel
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.GptEmerald
+import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.ReasoningAmber
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
+import com.example.ui.theme.TelemetryCyan
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -59,12 +59,17 @@ fun ChatInputBar(
     modelName: String,
     reasoningLevel: ReasoningLevel,
     reasoningSupported: Boolean,
+    sttEnabled: Boolean,
+    isListening: Boolean,
+    isTranscribing: Boolean,
+    text: String,
+    onTextChange: (String) -> Unit,
+    onMicClick: () -> Unit,
     onSelectReasoningLevel: (ReasoningLevel) -> Unit,
     onSendMessage: (String) -> Unit,
     onStopGenerating: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var text by remember { mutableStateOf("") }
     val canSend = text.isNotBlank() && !isGenerating
 
     Surface(
@@ -152,7 +157,7 @@ fun ChatInputBar(
             ) {
                 BasicTextField(
                     value = text,
-                    onValueChange = { text = it },
+                    onValueChange = onTextChange,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 24.dp, max = 120.dp)
@@ -168,7 +173,7 @@ fun ChatInputBar(
                     keyboardActions = KeyboardActions(onSend = {
                         if (canSend) {
                             onSendMessage(text.trim())
-                            text = ""
+                            onTextChange("")
                         }
                     }),
                     decorationBox = { innerTextField ->
@@ -192,6 +197,45 @@ fun ChatInputBar(
 
                 Spacer(modifier = Modifier.width(4.dp))
 
+                // Push-to-talk: tap to record, tap again to transcribe.
+                if (sttEnabled) {
+                    IconButton(
+                        onClick = onMicClick,
+                        enabled = !isGenerating && !isTranscribing,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    isListening -> ErrorRed.copy(alpha = 0.18f)
+                                    isTranscribing -> TelemetryCyan.copy(alpha = 0.15f)
+                                    else -> SurfaceDark.copy(alpha = 0.5f)
+                                }
+                            )
+                            .testTag("mic_button")
+                    ) {
+                        if (isTranscribing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = TelemetryCyan
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                                contentDescription = if (isListening) "Stop dictation" else "Dictate",
+                                tint = when {
+                                    isListening -> ErrorRed
+                                    isGenerating -> TextMuted
+                                    else -> TextSecondary
+                                },
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
                 // Send or Stop Button
                 if (isGenerating) {
                     IconButton(
@@ -214,7 +258,7 @@ fun ChatInputBar(
                         onClick = {
                             if (canSend) {
                                 onSendMessage(text.trim())
-                                text = ""
+                                onTextChange("")
                             }
                         },
                         enabled = canSend,

@@ -1,5 +1,9 @@
 package com.example.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,12 +29,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -48,12 +54,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.ContextCompat
 import com.example.data.ChatMessageEntity
 import com.example.model.ModelDownloadState
 import com.example.model.ModelLoadState
@@ -95,6 +103,20 @@ fun ChatScreen(
     val reasoningLevel by viewModel.reasoningLevel.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
 
+    // Speech. The engines stay off until their toggle in the Model Hub is on.
+    val sttEnabled by viewModel.sttEnabled.collectAsStateWithLifecycle()
+    val ttsEnabled by viewModel.ttsEnabled.collectAsStateWithLifecycle()
+    val sttState by viewModel.sttState.collectAsStateWithLifecycle()
+    val ttsState by viewModel.ttsState.collectAsStateWithLifecycle()
+    val sttError by viewModel.sttError.collectAsStateWithLifecycle()
+    val ttsError by viewModel.ttsError.collectAsStateWithLifecycle()
+    val speechError by viewModel.speechError.collectAsStateWithLifecycle()
+    val isListening by viewModel.isListening.collectAsStateWithLifecycle()
+    val isTranscribing by viewModel.isTranscribing.collectAsStateWithLifecycle()
+    val speakingMessageId by viewModel.speakingMessageId.collectAsStateWithLifecycle()
+    val synthesizingMessageId by viewModel.synthesizingMessageId.collectAsStateWithLifecycle()
+    val transcribedText by viewModel.transcribedText.collectAsStateWithLifecycle()
+
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
     val agentSteps by viewModel.agentSteps.collectAsStateWithLifecycle()
@@ -102,6 +124,32 @@ fun ChatScreen(
 
     var isHistoryOpen by remember { mutableStateOf(false) }
     var isModelsHubOpen by remember { mutableStateOf(false) }
+
+    // The composer text is hoisted so dictation can append a finished
+    // transcription to whatever the user already typed.
+    var inputText by remember { mutableStateOf("") }
+
+    LaunchedEffect(transcribedText) {
+        val text = transcribedText ?: return@LaunchedEffect
+        inputText = if (inputText.isBlank()) text else inputText.trimEnd() + " " + text
+        viewModel.consumeTranscription()
+    }
+
+    val context = LocalContext.current
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.startListening() else viewModel.onMicrophonePermissionDenied()
+    }
+    val onMicClick = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            viewModel.startListening()
+        } else {
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     val listState = rememberLazyListState()
 
@@ -198,6 +246,12 @@ fun ChatScreen(
                 modelName = currentModel.shortName,
                 reasoningLevel = reasoningLevel,
                 reasoningSupported = currentModel.supportsReasoning,
+                sttEnabled = sttEnabled,
+                isListening = isListening,
+                isTranscribing = isTranscribing,
+                text = inputText,
+                onTextChange = { inputText = it },
+                onMicClick = onMicClick,
                 onSelectReasoningLevel = { viewModel.setReasoningLevel(it) },
                 onSendMessage = { viewModel.sendMessage(it) },
                 onStopGenerating = { viewModel.stopGeneration() }
@@ -351,6 +405,51 @@ fun ChatScreen(
                     }
                 }
 
+                // Speech failures (permission, download, load, synthesis) are
+                // reported here rather than in the model banner: they don't
+                // block chatting.
+                val activeSpeechError = speechError ?: sttError ?: ttsError
+                if (activeSpeechError != null) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .testTag("speech_error_banner"),
+                        color = SurfaceElevated,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            ErrorRed.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = activeSpeechError,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    color = ErrorRed,
+                                    fontSize = 11.sp
+                                )
+                            )
+                            IconButton(
+                                onClick = { viewModel.dismissSpeechError() },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Chat Messages List
                 LazyColumn(
                     state = listState,
@@ -370,8 +469,12 @@ fun ChatScreen(
                             // hidden while a reply is being streamed.
                             showRewind = !isGenerating && message.role == "assistant" && !isLastMessage,
                             showRegenerate = !isGenerating && message.role == "assistant" && isLastMessage,
+                            ttsEnabled = ttsEnabled && message.role == "assistant" && message.content.isNotBlank(),
+                            isSpeaking = speakingMessageId == message.id,
+                            isSynthesizing = synthesizingMessageId == message.id,
                             onRewind = { viewModel.rewindToMessage(message.id) },
-                            onRegenerate = { viewModel.regenerateLastResponse() }
+                            onRegenerate = { viewModel.regenerateLastResponse() },
+                            onSpeak = { viewModel.toggleSpeakMessage(message.id, message.content) }
                         )
                     }
 
@@ -423,6 +526,14 @@ fun ChatScreen(
         currentModel = currentModel,
         loadState = loadState,
         downloadStates = downloadStates,
+        sttEnabled = sttEnabled,
+        ttsEnabled = ttsEnabled,
+        sttState = sttState,
+        ttsState = ttsState,
+        sttError = sttError,
+        ttsError = ttsError,
+        onToggleStt = { viewModel.setSpeechToTextEnabled(it) },
+        onToggleTts = { viewModel.setTextToSpeechEnabled(it) },
         onSelectAndLoadModel = { viewModel.loadModel(it) },
         onUnloadModel = { viewModel.unloadModel() },
         onDownloadModel = { viewModel.downloadModel(it) },

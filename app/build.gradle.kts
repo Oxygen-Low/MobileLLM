@@ -159,6 +159,13 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  implementation(libs.sherpa.onnx) {
+    // The published POM also lists desktop JVM natives, which are not needed
+    // on Android and would fail to resolve. The AAR itself bundles the JNI
+    // libraries for the ABIs this app ships.
+    isTransitive = false
+  }
+  implementation(libs.commons.compress)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

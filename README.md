@@ -4,6 +4,8 @@ A LLM app designed for mobile use. Instead of models running via api providers, 
 
 This means you could run LLMs completely offline if you lose internet access or simply want privacy.
 
+Speech to text and text to speech are on-device too: small Whisper Tiny and Piper models are downloaded on demand from the Model Hub, and each one is loaded only while its toggle is enabled.
+
 If a LLM is too slow or wont fit in your ram, try switching to a smaller one.
 
 You don't need to do much to update it. It automatically checks for new releases and updates.
@@ -21,8 +23,6 @@ More soon, it takes time to fine tune models.
 ## Upcoming Features (in order of priority)
 - Better update system + changelogs
 - Settings
-- Speech To Text (STT)
-- Text To Speech (TTS)
 - Image generation
 - More models (primarily fine tuned ones)
 - Characters and Universes, create characters and universes for roleplaying.

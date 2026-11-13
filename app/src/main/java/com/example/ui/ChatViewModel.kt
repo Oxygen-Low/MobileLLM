@@ -3,6 +3,8 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.audio.SpeechPlayer
+import com.example.audio.SpeechRecorder
 import com.example.data.AppDatabase
 import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
@@ -19,6 +21,8 @@ import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.model.PromptFormat
 import com.example.model.ReasoningLevel
+import com.example.model.SpeechEngineManager
+import com.example.model.SpeechEngineState
 import com.example.model.StoredTurn
 import com.example.tools.MCPToolExecutor
 import com.example.update.UpdateManager
@@ -45,6 +49,44 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val modelEngineManager = ModelEngineManager(mcpToolExecutor)
     val downloadManager = ModelDownloadManager(application)
     val updateManager = UpdateManager(application)
+
+    /**
+     * Small speech models live next to the chat models and follow the same
+     * autoload rules: loaded on start when the toggle was on, released on stop
+     * and on the idle timeout, and reloaded on demand.
+     */
+    val speechEngineManager = SpeechEngineManager(application, downloadManager)
+    private val speechRecorder = SpeechRecorder(application)
+    private val speechPlayer = SpeechPlayer(application)
+
+    val sttEnabled: StateFlow<Boolean> = speechEngineManager.sttEnabled
+    val ttsEnabled: StateFlow<Boolean> = speechEngineManager.ttsEnabled
+    val sttState: StateFlow<SpeechEngineState> = speechEngineManager.sttState
+    val ttsState: StateFlow<SpeechEngineState> = speechEngineManager.ttsState
+    val sttError: StateFlow<String?> = speechEngineManager.sttError
+    val ttsError: StateFlow<String?> = speechEngineManager.ttsError
+    val isListening: StateFlow<Boolean> = speechRecorder.isRecording
+    val isTranscribing: StateFlow<Boolean> = speechEngineManager.isTranscribing
+    val isSpeaking: StateFlow<Boolean> = speechPlayer.isSpeaking
+
+    private val _speechError = MutableStateFlow<String?>(null)
+    val speechError: StateFlow<String?> = _speechError.asStateFlow()
+
+    /**
+     * Text produced by the last dictation pass. The input field consumes it and
+     * calls [consumeTranscription], so it is written exactly once.
+     */
+    private val _transcribedText = MutableStateFlow<String?>(null)
+    val transcribedText: StateFlow<String?> = _transcribedText.asStateFlow()
+
+    private val _speakingMessageId = MutableStateFlow<String?>(null)
+    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
+
+    private val _synthesizingMessageId = MutableStateFlow<String?>(null)
+    val synthesizingMessageId: StateFlow<String?> = _synthesizingMessageId.asStateFlow()
+
+    private var speechJob: Job? = null
+    private var dictationJob: Job? = null
 
     val updateState = updateManager.state
 
@@ -128,6 +170,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Check if models were already downloaded locally
         checkDownloadedModels()
+        speechEngineManager.refresh()
 
         // Keep the inactivity timer in sync with the engine: schedule it whenever
         // weights are resident, cancel it as soon as they are not.
@@ -266,7 +309,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * countdown so the model is only released after a genuinely idle period.
      */
     fun onUserActivity() {
-        if (modelEngineManager.loadState.value != ModelLoadState.LOADED || _isGenerating.value) return
+        val llmResident = modelEngineManager.loadState.value == ModelLoadState.LOADED
+        if ((!llmResident && !hasResidentSpeech()) || _isGenerating.value) return
 
         val now = System.currentTimeMillis()
         if (now - lastActivityResetMs < ACTIVITY_RESET_THROTTLE_MS) return
@@ -274,8 +318,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         scheduleInactivityUnload()
     }
 
+    private fun hasResidentSpeech(): Boolean =
+        speechEngineManager.sttState.value == SpeechEngineState.READY ||
+            speechEngineManager.ttsState.value == SpeechEngineState.READY
+
     private fun scheduleInactivityUnload() {
-        if (modelEngineManager.loadState.value != ModelLoadState.LOADED || _isGenerating.value) return
+        val llmResident = modelEngineManager.loadState.value == ModelLoadState.LOADED
+        if ((!llmResident && !hasResidentSpeech()) || _isGenerating.value) return
 
         inactivityJob?.cancel()
         inactivityJob = viewModelScope.launch {
@@ -283,6 +332,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (modelEngineManager.loadState.value == ModelLoadState.LOADED && !_isGenerating.value) {
                 modelEngineManager.unloadModel()
             }
+            // Speech engines are small but they follow the same idle policy:
+            // release them and let the next mic/speak action reload on demand.
+            speechEngineManager.releaseEngines()
         }
     }
 
@@ -294,12 +346,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 modelEngineManager.loadModel(selectedModel.value, file)
             }
         }
+        // Autoload the speech engines the user left enabled.
+        viewModelScope.launch { speechEngineManager.restoreEnabled() }
     }
 
     fun onAppStop() {
         stopUpdateChecks()
         inactivityJob?.cancel()
         inactivityJob = null
+        stopSpeaking()
+        viewModelScope.launch {
+            speechRecorder.cancel()
+            speechEngineManager.releaseEngines()
+        }
         viewModelScope.launch {
             modelEngineManager.unloadModel()
         }
@@ -340,6 +399,131 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setReasoningLevel(level: ReasoningLevel) {
         _reasoningLevel.value = level
+    }
+
+    // ---------------------------------------------------------------------
+    // Speech
+    // ---------------------------------------------------------------------
+
+    fun setSpeechToTextEnabled(enabled: Boolean) {
+        _speechError.value = null
+        viewModelScope.launch {
+            if (!enabled) {
+                // A toggle turned off mid-dictation must not leave the
+                // microphone recording in the background.
+                dictationJob?.cancel()
+                dictationJob = null
+                speechRecorder.cancel()
+            }
+            speechEngineManager.setSttEnabled(enabled)
+            scheduleInactivityUnload()
+        }
+    }
+
+    fun setTextToSpeechEnabled(enabled: Boolean) {
+        _speechError.value = null
+        if (!enabled) stopSpeaking()
+        viewModelScope.launch {
+            speechEngineManager.setTtsEnabled(enabled)
+            scheduleInactivityUnload()
+        }
+    }
+
+    /** Starts push-to-talk recording. Tapping the mic again stops it. */
+    fun startListening() {
+        if (!sttEnabled.value || isGenerationRunning()) return
+        if (speechRecorder.isRecording.value) {
+            stopListening()
+            return
+        }
+        if (dictationJob?.isActive == true) return
+
+        _speechError.value = null
+        try {
+            speechRecorder.start(viewModelScope)
+        } catch (t: Throwable) {
+            _speechError.value = t.message ?: "Could not open the microphone"
+            return
+        }
+
+        // The model may have been released by the idle timer. Load it while
+        // the user is speaking so a short clip is transcribed without delay.
+        viewModelScope.launch { speechEngineManager.ensureSttReady() }
+    }
+
+    fun stopListening() {
+        if (!speechRecorder.isRecording.value || dictationJob?.isActive == true) return
+
+        dictationJob = viewModelScope.launch {
+            val samples = speechRecorder.stop()
+            if (samples.isEmpty()) {
+                scheduleInactivityUnload()
+                return@launch
+            }
+            val text = speechEngineManager.transcribe(samples)
+            if (text.isNotBlank()) {
+                _transcribedText.value = text
+            } else if (sttState.value == SpeechEngineState.READY) {
+                _speechError.value = "No speech detected"
+            }
+            scheduleInactivityUnload()
+        }
+    }
+
+    /** Called by the input field after it appended [transcribedText]. */
+    fun consumeTranscription() {
+        _transcribedText.value = null
+    }
+
+    fun onMicrophonePermissionDenied() {
+        _speechError.value = "Microphone permission is required for speech to text"
+    }
+
+    fun dismissSpeechError() {
+        _speechError.value = null
+        speechEngineManager.clearErrors()
+    }
+
+    /** Speaks an assistant reply, or stops it when it is already speaking. */
+    fun toggleSpeakMessage(messageId: String, text: String) {
+        if (!ttsEnabled.value) return
+        if (_speakingMessageId.value == messageId || _synthesizingMessageId.value == messageId) {
+            stopSpeaking()
+            return
+        }
+
+        stopSpeaking()
+        speechJob = viewModelScope.launch {
+            _synthesizingMessageId.value = messageId
+            val audio = speechEngineManager.synthesize(text)
+            if (_synthesizingMessageId.value != messageId) return@launch
+            _synthesizingMessageId.value = null
+
+            if (audio == null) {
+                _speechError.value = speechEngineManager.ttsError.value
+                    ?: "Could not synthesize this reply"
+                scheduleInactivityUnload()
+                return@launch
+            }
+
+            _speakingMessageId.value = messageId
+            speechPlayer.play(audio.samples, audio.sampleRate) {
+                if (_speakingMessageId.value == messageId) {
+                    _speakingMessageId.value = null
+                }
+            }
+            // The synthesized WAV is complete; let the idle timer release the
+            // model while the media player finishes the audio.
+            scheduleInactivityUnload()
+        }
+    }
+
+    fun stopSpeaking() {
+        speechJob?.cancel()
+        speechJob = null
+        speechPlayer.stop()
+        _speakingMessageId.value = null
+        _synthesizingMessageId.value = null
     }
 
     fun createNewSession() {
