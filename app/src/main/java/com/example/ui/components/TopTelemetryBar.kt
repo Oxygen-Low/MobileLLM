@@ -43,7 +43,7 @@ import com.example.model.ModelProfile
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.ErrorRed
-import com.example.ui.theme.GptEmerald
+import com.example.ui.theme.BrandEmerald
 import com.example.ui.theme.ReasoningAmber
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
@@ -83,7 +83,7 @@ fun TopTelemetryBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Models Menu Button (ChatGPT Style Model Selector Button)
+                // Models Menu Button (Model Selector Button)
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -174,7 +174,7 @@ fun TopTelemetryBar(
                     Text(
                         text = if (currentTps > 0) String.format("%.1f T/s", currentTps) else "0.0 T/s",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (currentTps > 0) GptEmerald else TextMuted,
+                            color = if (currentTps > 0) BrandEmerald else TextMuted,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Medium
                         )

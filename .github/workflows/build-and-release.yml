@@ -37,6 +37,26 @@ jobs:
           echo "tag=V$next" >> "$GITHUB_OUTPUT"
           echo "Building V$next (versionCode $next)"
 
+      # Every release has to describe its changes. The file is also the release
+      # notes of the GitHub release and the changelog the app shows after the
+      # update, so there is only one place to write it down.
+      - name: Check the changelog of this version
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          file="changelogs/${TAG}.md"
+          if [ ! -f "$file" ]; then
+            echo "::error title=Missing changelog::$file does not exist. Describe the changes of $TAG in that file (see AGENTS.md) and push again."
+            exit 1
+          fi
+          if ! head -n 1 "$file" | grep -qx "# ${TAG}"; then
+            echo "::error title=Wrong changelog heading::The first line of $file has to be '# ${TAG}'."
+            exit 1
+          fi
+          echo "Changelog of $TAG: $file"
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -122,10 +142,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
-          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
           set -euo pipefail
           gh release create "$TAG" dist/MobileLLM.apk \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
-            --notes "Automated build of $TAG (version code $VERSION_CODE)."
+            --notes-file "changelogs/${TAG}.md"

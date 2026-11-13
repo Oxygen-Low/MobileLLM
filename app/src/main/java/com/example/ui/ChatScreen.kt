@@ -71,6 +71,7 @@ import com.example.ui.components.ChatMessageItem
 import com.example.ui.components.ModelsHubSheet
 import com.example.ui.components.SessionDrawerSheet
 import com.example.ui.components.TopTelemetryBar
+import com.example.ui.components.ChangelogDialog
 import com.example.ui.components.UpdateDialog
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
@@ -102,6 +103,7 @@ fun ChatScreen(
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val reasoningLevel by viewModel.reasoningLevel.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+    val changelogState by viewModel.changelogState.collectAsStateWithLifecycle()
 
     // Speech. The engines stay off until their toggle in the Model Hub is on.
     val sttEnabled by viewModel.sttEnabled.collectAsStateWithLifecycle()
@@ -559,5 +561,12 @@ fun ChatScreen(
         onDownload = { viewModel.downloadAndInstallUpdate() },
         onInstall = { viewModel.installUpdate() },
         onDismiss = { viewModel.dismissUpdate() }
+    )
+
+    // Changelog of the versions the app was updated over.
+    ChangelogDialog(
+        state = changelogState,
+        onShow = { viewModel.showChangelog() },
+        onDismiss = { viewModel.dismissChangelog() }
     )
 }

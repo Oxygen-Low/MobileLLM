@@ -67,7 +67,7 @@ import kotlinx.coroutines.delay
 private const val REASONING_IDLE_COLLAPSE_MS = 700L
 
 /**
- * ChatGPT-style reasoning disclosure.
+ * Reasoning disclosure.
  * - Collapsed: a quiet "Thinking…" / "Thought for 4 seconds" row with a chevron.
  * - Streaming: the label sweeps with a soft shimmer.
  * - Expanded: plain muted prose, no card chrome or accent gutter.
@@ -83,7 +83,7 @@ fun ReasoningAccordion(
     val context = LocalContext.current
 
     // While reasoning is arriving, the trace opens and streams automatically.
-    // Once tokens stop (or generation ends), it folds back up like ChatGPT.
+    // Once tokens stop (or generation ends), it folds back up again.
     var autoExpanded by remember { mutableStateOf(false) }
     var reasoningActive by remember { mutableStateOf(isStreaming) }
     var userExpanded by remember { mutableStateOf<Boolean?>(if (initialExpanded) true else null) }
@@ -151,7 +151,7 @@ fun ReasoningAccordion(
             .fillMaxWidth()
             .testTag("reasoning_accordion")
     ) {
-        // ChatGPT-style disclosure header: muted text + chevron, no container.
+        // Disclosure header: muted text + chevron, no container.
         Row(
             modifier = Modifier
                 .fillMaxWidth()

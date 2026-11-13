@@ -98,6 +98,16 @@ android {
     compose = true
     buildConfig = true
   }
+
+  // The changelog files live in the repository root so that everyone who
+  // works on the app edits the same files. They are packaged as assets so the
+  // app can show them without a network connection.
+  sourceSets {
+    getByName("main") {
+      assets.srcDir(rootProject.file("changelogs"))
+    }
+  }
+
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
     includeInApk = false

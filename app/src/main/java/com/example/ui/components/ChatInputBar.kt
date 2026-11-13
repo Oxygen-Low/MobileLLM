@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.ReasoningLevel
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
-import com.example.ui.theme.GptEmerald
+import com.example.ui.theme.BrandEmerald
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.ReasoningAmber
 import com.example.ui.theme.SurfaceDark
@@ -107,7 +107,7 @@ fun ChatInputBar(
                         val tint = when (level) {
                             ReasoningLevel.NONE -> TextMuted
                             ReasoningLevel.LOW -> TextSecondary
-                            ReasoningLevel.MEDIUM -> GptEmerald
+                            ReasoningLevel.MEDIUM -> BrandEmerald
                             ReasoningLevel.HIGH, ReasoningLevel.MAX -> ReasoningAmber
                         }
                         Box(

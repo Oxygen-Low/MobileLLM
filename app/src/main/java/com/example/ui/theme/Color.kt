@@ -2,8 +2,8 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ChatGPT / Corporate Dark Theme Palette (OpenAI / Anthropic modern enterprise aesthetic)
-val BgDark = Color(0xFF212121)          // Main canvas (ChatGPT dark background #212121)
+// Corporate Dark Theme Palette (modern enterprise aesthetic)
+val BgDark = Color(0xFF212121)          // Main canvas (dark background #212121)
 val SurfaceDark = Color(0xFF2F2F2F)     // Bubble / Container background (#2F2F2F)
 val SurfaceElevated = Color(0xFF383838) // Input field, modals, active pills (#383838)
 val SurfaceHover = Color(0xFF424242)    // Secondary elevated / hover
@@ -12,9 +12,9 @@ val BorderLight = Color(0xFF676767)     // Focused / high-contrast border
 
 // Functional & Status Accents (Restrained corporate accents)
 val CorporateAccent = Color(0xFFECECEC) // High-contrast clean white accent
-val GptEmerald = Color(0xFF10A37F)      // OpenAI signature enterprise green
+val BrandEmerald = Color(0xFF10A37F)    // Signature enterprise green
 val TerminalGreen = Color(0xFF10A37F)   // Status / success
-val TelemetryCyan = Color(0xFF10A37F)   // Clean brand tint (switched from electric blue to GPT emerald/neutral)
+val TelemetryCyan = Color(0xFF10A37F)   // Clean brand tint (switched from electric blue to emerald/neutral)
 val ReasoningAmber = Color(0xFFE2A03F)  // Warm thought/reasoning amber
 val AccentPurple = Color(0xFF8B5CF6)    // Tool / special accent
 

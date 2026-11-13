@@ -61,7 +61,7 @@ import com.example.data.ChatMessageEntity
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
-import com.example.ui.theme.GptEmerald
+import com.example.ui.theme.BrandEmerald
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TelemetryCyan
@@ -99,7 +99,7 @@ fun ChatMessageItem(
         contentAlignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
     ) {
         if (isUser) {
-            // User Message Bubble (ChatGPT Style: Sleek matte SurfaceElevated bubble)
+            // User Message Bubble (Sleek matte SurfaceElevated bubble)
             Surface(
                 modifier = Modifier
                     .widthIn(max = 340.dp)
@@ -139,7 +139,7 @@ fun ChatMessageItem(
                 modifier = Modifier.testTag("tool_step_${message.id}")
             )
         } else {
-            // Assistant Message (ChatGPT style: natural full-width document flow)
+            // Assistant Message (natural full-width document flow)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -157,7 +157,7 @@ fun ChatMessageItem(
                     Spacer(modifier = Modifier.height(6.dp))
                 }
 
-                // Reasoning Accordion (ChatGPT style). While waiting for the first
+                // Reasoning Accordion. While waiting for the first
                 // token we show "Thinking…"; it disappears if the model answers
                 // without emitting a reasoning trace.
                 if (!message.reasoningContent.isNullOrBlank() ||
@@ -173,7 +173,7 @@ fun ChatMessageItem(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // Main Assistant Content (ChatGPT clean typography flow)
+                // Main Assistant Content (clean typography flow)
                 if (message.content.isNotBlank()) {
                     Column(
                         modifier = Modifier
@@ -208,7 +208,7 @@ fun ChatMessageItem(
                                         text = String.format("• %.1f T/s", message.tokensPerSecond),
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontSize = 11.sp,
-                                            color = GptEmerald,
+                                            color = BrandEmerald,
                                             fontWeight = FontWeight.Medium
                                         )
                                     )
@@ -239,7 +239,7 @@ fun ChatMessageItem(
                                                 } else {
                                                     "Read aloud"
                                                 },
-                                                tint = if (isSpeaking) GptEmerald else TextMuted,
+                                                tint = if (isSpeaking) BrandEmerald else TextMuted,
                                                 modifier = Modifier.size(15.dp)
                                             )
                                         }
@@ -292,7 +292,7 @@ fun ChatMessageItem(
                                     Icon(
                                         imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
                                         contentDescription = "Copy message",
-                                        tint = if (copied) GptEmerald else TextMuted,
+                                        tint = if (copied) BrandEmerald else TextMuted,
                                         modifier = Modifier.size(15.dp)
                                     )
                                 }

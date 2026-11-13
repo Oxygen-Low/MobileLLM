@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.SpeechPlayer
 import com.example.audio.SpeechRecorder
+import com.example.changelog.ChangelogManager
 import com.example.data.AppDatabase
 import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
@@ -51,6 +52,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val updateManager = UpdateManager(application)
 
     /**
+     * Offers the changelog of the versions the user skipped when the app was
+     * updated.
+     */
+    val changelogManager = ChangelogManager(application)
+
+    /**
      * Small speech models live next to the chat models and follow the same
      * autoload rules: loaded on start when the toggle was on, released on stop
      * and on the idle timeout, and reloaded on demand.
@@ -89,6 +96,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var dictationJob: Job? = null
 
     val updateState = updateManager.state
+    val changelogState = changelogManager.state
 
     val availableModels = MutableStateFlow(ModelProfile.DEFAULT_MODELS)
     val selectedModel = MutableStateFlow(ModelProfile.DEEP_SMOLLM3)
@@ -340,6 +348,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppStart() {
         startUpdateChecks()
+        // The app may have been updated since the last time it was used, so
+        // offer the changelog of the versions the user skipped.
+        changelogManager.onAppStart()
         viewModelScope.launch {
             if (selectedModel.value.isReadyToLoad && modelEngineManager.loadState.value != ModelLoadState.LOADED) {
                 val file = downloadManager.getModelFile(selectedModel.value.id)
@@ -395,6 +406,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissUpdate() {
         updateManager.dismiss()
+    }
+
+    /** The user wants to read what changed since the last version they used. */
+    fun showChangelog() {
+        changelogManager.showChanges()
+    }
+
+    /** The user does not want to read the changelog right now. */
+    fun dismissChangelog() {
+        changelogManager.dismiss()
     }
 
     fun setReasoningLevel(level: ReasoningLevel) {
