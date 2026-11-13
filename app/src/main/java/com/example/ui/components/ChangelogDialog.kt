@@ -152,40 +152,51 @@ private fun ChangelogEntryView(entry: ChangelogEntry) {
         )
         Spacer(modifier = Modifier.height(6.dp))
 
-        val blocks = Markdown.parse(entry.body).dropTitle(entry.versionName)
-        blocks.forEach { block ->
-            when (block) {
-                is MarkdownBlock.Heading -> Text(
-                    text = inlineMarkdown(block.text),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                )
-
-                is MarkdownBlock.Bullet -> Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "•",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextMuted,
-                        modifier = Modifier.padding(end = 8.dp)
+        if (!entry.hasNotes) {
+            // A version can be released without a changelog file, so there is
+            // nothing to read. The entry says that instead of leaving an
+            // empty section behind.
+            Text(
+                text = entry.body,
+                style = MaterialTheme.typography.bodyLarge,
+                color = TextMuted
+            )
+        } else {
+            val blocks = Markdown.parse(entry.body).dropTitle(entry.versionName)
+            blocks.forEach { block ->
+                when (block) {
+                    is MarkdownBlock.Heading -> Text(
+                        text = inlineMarkdown(block.text),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
                     )
-                    Text(
+
+                    is MarkdownBlock.Bullet -> Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "•",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = TextMuted,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            text = inlineMarkdown(block.text),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = TextSecondary
+                        )
+                    }
+
+                    is MarkdownBlock.Paragraph -> Text(
                         text = inlineMarkdown(block.text),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        modifier = Modifier.padding(vertical = 2.dp)
                     )
                 }
-
-                is MarkdownBlock.Paragraph -> Text(
-                    text = inlineMarkdown(block.text),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(vertical = 2.dp)
-                )
             }
         }
     }

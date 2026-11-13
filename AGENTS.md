@@ -17,9 +17,14 @@ are llama.cpp builds, the inference engine is native code under
 ## Changelogs are not optional
 
 **Every change you make has to be described in the changelog of the version it
-will be released in.** The release workflow refuses to publish a build whose
-changelog file is missing, and the app shows those notes to the user after the
-update. A change that is not written down does not exist for the users.
+will be released in.** The app shows those notes to the user after the update
+and the file is the release notes of the GitHub release. A change that is not
+written down does not exist for the users.
+
+A version that is released without a changelog file is not a broken release:
+the build is published anyway and the notes of that version say that there are
+no changelogs for it. Writing the file is still the rule for every change you
+make.
 
 **Rule for agents: write the changelog file as part of the work, not as an
 optional extra.** Whenever you finish a change that a user would notice, create
@@ -94,8 +99,10 @@ Rules:
 After an update the app asks whether the user wants to read what changed. If
 they say yes, it shows the changelog of every version between the version they
 were using and the version they are on now, so a user that skipped three
-releases sees all three files. The changelog files are bundled into the APK,
-which means they are read from disk and work offline.
+releases sees all three files. A version that was released without a changelog
+file says that there are no changelogs for it instead of breaking the list.
+The changelog files are bundled into the APK, which means they are read from
+disk and work offline.
 
 ## Building and testing
 

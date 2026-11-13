@@ -10,7 +10,14 @@ package com.example.changelog
 data class ChangelogEntry(
     val versionCode: Int,
     val versionName: String,
-    val body: String
+    val body: String,
+
+    /**
+     * False when the version was released without a changelog file.
+     *
+     * Such a version has nothing to read, the entry only says so.
+     */
+    val hasNotes: Boolean = true
 ) {
     /**
      * The heading of the file, or the version name when the file has no
@@ -24,6 +31,24 @@ data class ChangelogEntry(
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?: versionName
+
+    companion object {
+        /** Shown for a version that was released without a changelog file. */
+        const val NO_CHANGELOG = "No changelogs for this version."
+
+        /**
+         * The entry of a version that was released without a changelog file.
+         *
+         * A release without a file is published anyway, so the app has to
+         * tell the user that there is nothing to read instead of failing.
+         */
+        fun missing(versionCode: Int): ChangelogEntry = ChangelogEntry(
+            versionCode = versionCode,
+            versionName = ChangelogVersion.label(versionCode),
+            body = NO_CHANGELOG,
+            hasNotes = false
+        )
+    }
 }
 
 /**

@@ -39,7 +39,9 @@ jobs:
 
       # Every release has to describe its changes. The file is also the release
       # notes of the GitHub release and the changelog the app shows after the
-      # update, so there is only one place to write it down.
+      # update, so there is only one place to write it down. A release without
+      # a file is published anyway, its notes then say that there are no
+      # changelogs for that version.
       - name: Check the changelog of this version
         shell: bash
         env:
@@ -48,8 +50,8 @@ jobs:
           set -euo pipefail
           file="changelogs/${TAG}.md"
           if [ ! -f "$file" ]; then
-            echo "::error title=Missing changelog::$file does not exist. Describe the changes of $TAG in that file (see AGENTS.md) and push again."
-            exit 1
+            echo "::warning title=Missing changelog::$file does not exist. The release notes of $TAG will say that there are no changelogs for this version."
+            exit 0
           fi
           if ! head -n 1 "$file" | grep -qx "# ${TAG}"; then
             echo "::error title=Wrong changelog heading::The first line of $file has to be '# ${TAG}'."
@@ -144,7 +146,15 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" dist/MobileLLM.apk \
-            --target "$GITHUB_SHA" \
-            --title "$TAG" \
-            --notes-file "changelogs/${TAG}.md"
+          notes_file="changelogs/${TAG}.md"
+          if [ -f "$notes_file" ]; then
+            gh release create "$TAG" dist/MobileLLM.apk \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file "$notes_file"
+          else
+            gh release create "$TAG" dist/MobileLLM.apk \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes "No changelogs for this version."
+          fi

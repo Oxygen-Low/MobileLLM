@@ -2,11 +2,13 @@ package com.example
 
 import com.example.changelog.ChangelogEntry
 import com.example.changelog.ChangelogRange
+import com.example.changelog.ChangelogRepository
 import com.example.changelog.ChangelogUpdate
 import com.example.changelog.ChangelogVersion
 import com.example.changelog.Markdown
 import com.example.changelog.MarkdownBlock
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -148,5 +150,46 @@ class ChangelogTest {
 
         assertEquals("V12", entry.title)
         assertTrue(entry.body.contains("Added a changelog system."))
+    }
+
+    // ---------------------------------------------------------------------
+    // Versions without a changelog file
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun `a version without a changelog file says that there is nothing to read`() {
+        val entry = ChangelogEntry.missing(13)
+
+        assertEquals(13, entry.versionCode)
+        assertEquals("V13", entry.versionName)
+        assertEquals("No changelogs for this version.", entry.body)
+        assertFalse(entry.hasNotes)
+    }
+
+    @Test
+    fun `a version without a changelog file does not break the other versions`() {
+        val repository = ChangelogRepository { fileName ->
+            when (fileName) {
+                "V12.md" -> "# V12\n\n- Added a changelog system."
+                else -> null
+            }
+        }
+
+        val entries = repository.entriesBetween(11, 13)
+
+        assertEquals(2, entries.size)
+        assertTrue(entries[0].hasNotes)
+        assertEquals("V12", entries[0].versionName)
+        assertFalse(entries[1].hasNotes)
+        assertEquals("No changelogs for this version.", entries[1].body)
+    }
+
+    @Test
+    fun `a version without a changelog file is still listed`() {
+        val repository = ChangelogRepository { null }
+
+        val entries = repository.entriesBetween(11, 13)
+
+        assertEquals(listOf(12, 13), entries.map { it.versionCode })
     }
 }
