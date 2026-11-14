@@ -65,6 +65,7 @@ class ExampleRobolectricTest {
         assertEquals("Qwen/Qwen3-0.6B-GGUF", ModelProfile.QWEN3_0_6B.hfRepo)
         assertTrue(ModelProfile.QWEN3_0_6B.supportsReasoning)
         assertEquals(2, ModelProfile.DEFAULT_MODELS.size)
+        assertEquals("qwen3-0.6b", ModelProfile.DEFAULT_MODELS.first().id)
     }
 
     @Test

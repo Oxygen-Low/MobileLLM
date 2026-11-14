@@ -99,7 +99,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val changelogState = changelogManager.state
 
     val availableModels = MutableStateFlow(ModelProfile.DEFAULT_MODELS)
-    val selectedModel = MutableStateFlow(ModelProfile.DEEP_SMOLLM3)
+    val selectedModel = MutableStateFlow(ModelProfile.QWEN3_0_6B)
 
     val downloadStates: StateFlow<Map<String, DownloadProgressInfo>> = downloadManager.downloadStates
 

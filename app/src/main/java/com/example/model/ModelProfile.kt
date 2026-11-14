@@ -42,7 +42,35 @@ data class ModelProfile(
 
     companion object {
         /**
-         * The larger default model shipped by the app.
+         * The default model shipped by the app.
+         *
+         * Qwen3's official 0.6B GGUF release (Q8_0, the only quant shipped in
+         * the upstream repo). Small enough to stay comfortably in RAM on most
+         * phones while still supporting Qwen's hybrid thinking mode.
+         */
+        val QWEN3_0_6B = ModelProfile(
+            id = "qwen3-0.6b",
+            name = "Qwen3-0.6B",
+            shortName = "Qwen3",
+            format = ModelFormat.GGUF,
+            quantization = "Q8_0",
+            parameters = "0.6B",
+            contextLength = 32768,
+            memoryMb = 900,
+            downloadSizeMb = 610,
+            modelScopeRepo = "Qwen/Qwen3-0.6B-GGUF",
+            modelScopeFile = "Qwen3-0.6B-Q8_0.gguf",
+            hfRepo = "Qwen/Qwen3-0.6B-GGUF",
+            hfFile = "Qwen3-0.6B-Q8_0.gguf",
+            modelScopeUrl = "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF",
+            description = "Qwen3 0.6B (Q8_0) with switchable thinking mode, running fully on-device via llama.cpp.",
+            supportsReasoning = true,
+            promptStyle = PromptStyle.QWEN3,
+            downloadState = ModelDownloadState.NOT_DOWNLOADED
+        )
+
+        /**
+         * An alternative larger model shipped by the app.
          *
          * Q4_K_M is the smallest quantisation of this checkpoint that keeps
          * output quality intact while fitting a 3B model in ~2 GB of RAM.
@@ -69,32 +97,6 @@ data class ModelProfile(
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )
 
-        /**
-         * Qwen3's official 0.6B GGUF release (Q8_0, the only quant shipped in
-         * the upstream repo). Small enough to stay comfortably in RAM on most
-         * phones while still supporting Qwen's hybrid thinking mode.
-         */
-        val QWEN3_0_6B = ModelProfile(
-            id = "qwen3-0.6b",
-            name = "Qwen3-0.6B",
-            shortName = "Qwen3",
-            format = ModelFormat.GGUF,
-            quantization = "Q8_0",
-            parameters = "0.6B",
-            contextLength = 32768,
-            memoryMb = 900,
-            downloadSizeMb = 610,
-            modelScopeRepo = "Qwen/Qwen3-0.6B-GGUF",
-            modelScopeFile = "Qwen3-0.6B-Q8_0.gguf",
-            hfRepo = "Qwen/Qwen3-0.6B-GGUF",
-            hfFile = "Qwen3-0.6B-Q8_0.gguf",
-            modelScopeUrl = "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF",
-            description = "Qwen3 0.6B (Q8_0) with switchable thinking mode, running fully on-device via llama.cpp.",
-            supportsReasoning = true,
-            promptStyle = PromptStyle.QWEN3,
-            downloadState = ModelDownloadState.NOT_DOWNLOADED
-        )
-
-        val DEFAULT_MODELS = listOf(DEEP_SMOLLM3, QWEN3_0_6B)
+        val DEFAULT_MODELS = listOf(QWEN3_0_6B, DEEP_SMOLLM3)
     }
 }
