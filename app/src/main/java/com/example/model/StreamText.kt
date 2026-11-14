@@ -1,5 +1,6 @@
 package com.example.model
 
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.Locale
 
@@ -203,6 +204,29 @@ internal object ToolCallParser {
             parseJson(trimmed, knownTools)?.let { return it }
         }
 
+        // Direct tool name prefix check: e.g. "edit_html_sandbox: { ... }" or "duckduckgo_search: latest news"
+        for (tool in knownTools) {
+            val toolPrefix = normalizeToolName(tool)
+            val trimmedLower = trimmed.lowercase(Locale.US)
+            val matchLength = when {
+                trimmedLower.startsWith("$toolPrefix:") -> toolPrefix.length + 1
+                trimmedLower.startsWith("$toolPrefix=") -> toolPrefix.length + 1
+                trimmedLower.startsWith("$toolPrefix\n") -> toolPrefix.length
+                trimmedLower.startsWith("$toolPrefix ") -> toolPrefix.length
+                trimmedLower == toolPrefix -> toolPrefix.length
+                else -> -1
+            }
+            if (matchLength >= 0) {
+                val rest = trimmed.substring(matchLength).trim()
+                val argument = if (rest.startsWith("{") && rest.endsWith("}")) {
+                    rest
+                } else {
+                    rest.stripQuotes()
+                }
+                return ToolCallDetector.ParsedToolCall(tool, argument)
+            }
+        }
+
         val lines = trimmed.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
         var labelledName: String? = null
@@ -272,9 +296,18 @@ internal object ToolCallParser {
         text: String,
         knownTools: Set<String>
     ): ToolCallDetector.ParsedToolCall? {
-        val name = Regex("\"(?:name|tool)\"\\s*:\\s*\"([^\"]*)\"").find(text)
-            ?.groupValues?.get(1) ?: return null
-        val canonical = canonicalName(name, knownTools) ?: return null
+        val nameMatch = Regex("\"(?:name|tool|tool_name)\"\\s*:\\s*\"([^\"]*)\"").find(text)
+            ?: return null
+        val canonical = canonicalName(nameMatch.groupValues[1], knownTools) ?: return null
+
+        val objMatch = Regex("\"(?:arguments?|params|parameters)\"\\s*:\\s*(\\{[\\s\\S]*?\\})").find(text)
+        if (objMatch != null) {
+            val inner = objMatch.groupValues[1].trim()
+            if (canonical in setOf("edit_html_sandbox", "read_html_sandbox")) {
+                return ToolCallDetector.ParsedToolCall(canonical, inner)
+            }
+        }
+
         val argument = Regex("\"(?:arguments?|query|expression|input)\"\\s*:\\s*\"([^\"]*)\"")
             .find(text)?.groupValues?.get(1).orEmpty()
         return ToolCallDetector.ParsedToolCall(canonical, argument.stripQuotes())

@@ -72,6 +72,7 @@ import com.example.ui.components.ModelsHubSheet
 import com.example.ui.components.SessionDrawerSheet
 import com.example.ui.components.TopTelemetryBar
 import com.example.ui.components.ChangelogDialog
+import com.example.ui.components.FullscreenHtmlAppDialog
 import com.example.ui.components.UpdateDialog
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
@@ -121,9 +122,11 @@ fun ChatScreen(
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
     val agentSteps by viewModel.agentSteps.collectAsStateWithLifecycle()
     val persistedReplyId by viewModel.persistedReplyId.collectAsStateWithLifecycle()
+    val sandboxContent by viewModel.sandboxContent.collectAsStateWithLifecycle()
 
     var isHistoryOpen by remember { mutableStateOf(false) }
     var isModelsHubOpen by remember { mutableStateOf(false) }
+    var isSandboxOpen by remember { mutableStateOf(false) }
 
     // The composer text is hoisted so dictation can append a finished
     // transcription to whatever the user already typed.
@@ -235,6 +238,8 @@ fun ChatScreen(
                 memoryMb = memoryMb,
                 currentTps = currentTps,
                 currentDate = viewModel.currentDate,
+                hasSandboxContent = sandboxContent.isNotBlank(),
+                onOpenSandbox = { isSandboxOpen = true },
                 onOpenModelsHub = { isModelsHubOpen = true },
                 onToggleHistory = { isHistoryOpen = true },
                 onNewChat = { viewModel.createNewSession() }
@@ -563,4 +568,14 @@ fun ChatScreen(
         onShow = { viewModel.showChangelog() },
         onDismiss = { viewModel.dismissChangelog() }
     )
+
+    // Fullscreen interactive HTML sandbox dialog
+    if (isSandboxOpen && sandboxContent.isNotBlank()) {
+        FullscreenHtmlAppDialog(
+            isOpen = true,
+            htmlContent = sandboxContent,
+            title = "Interactive App / Game Sandbox",
+            onDismiss = { isSandboxOpen = false }
+        )
+    }
 }

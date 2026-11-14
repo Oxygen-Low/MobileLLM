@@ -1,4 +1,4 @@
-package com.example.model
+﻿package com.example.model
 
 import android.util.Log
 import com.example.model.internal.LlamaBridge
@@ -515,7 +515,13 @@ class ModelEngineManager(
         builder.append("\nReplace the tool name with one of the names listed above and the text after the colon with the argument that tool needs.")
         builder.append("\nIf a tool has no parameter, write only its name followed by a colon.")
         builder.append("\nAfter the tool result arrives, reason about it and then either call another tool or answer the user.")
-        builder.append("\nCall a tool whenever the answer depends on live information, the current date or time, or arithmetic.")
+        builder.append("\n\nWhen asked to create or edit an application, web app, or game, use the HTML sandbox tools (read_html_sandbox, edit_html_sandbox):")
+        builder.append("\n- Specifically design the HTML for mobile screens, not desktop. Include `<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no\">`.")
+        builder.append("\n- Build touch-first controls (touch/tap listeners, touch controls, on-screen buttons/joysticks instead of keyboard or hover events).")
+        builder.append("\n- Make the UI mobile-friendly: full width/height responsive layouts, dark background, thumb-friendly tap targets, and no horizontal scroll.")
+        builder.append("\n- For a new sandbox, call `edit_html_sandbox` with `{\"old_string\": \"\", \"new_string\": \"...\"}` to write the complete initial HTML file.")
+        builder.append("\n- When modifying an existing sandbox, read it first with `read_html_sandbox` if needed, then use `edit_html_sandbox` with the exact unique `old_string` and the updated `new_string`.")
+        builder.append("\nCall a tool whenever the answer depends on live information, the current date or time, arithmetic, or creating/editing an HTML sandbox app.")
         return builder.toString()
     }
 

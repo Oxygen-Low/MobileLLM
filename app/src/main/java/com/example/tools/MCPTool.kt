@@ -1,4 +1,4 @@
-package com.example.tools
+﻿package com.example.tools
 
 data class MCPTool(
     val name: String,
@@ -16,6 +16,8 @@ fun toolDisplayName(toolName: String?): String = when (toolName) {
     "duckduckgo_search" -> "Web & News Search"
     "get_current_datetime" -> "Device Clock"
     "calculate_expression" -> "Calculator"
+    "edit_html_sandbox" -> "Edit HTML Sandbox"
+    "read_html_sandbox" -> "Read HTML Sandbox"
     null -> "Tool"
     else -> toolName
 }

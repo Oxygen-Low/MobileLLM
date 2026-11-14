@@ -16,8 +16,11 @@ class MCPToolExecutor(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+        .build(),
+    var htmlSandboxManager: HtmlSandboxManager? = null
 ) {
+    var activeSessionId: String? = null
+
     val availableTools = listOf(
         MCPTool(
             name = "duckduckgo_search",
@@ -33,6 +36,16 @@ class MCPToolExecutor(
             name = "calculate_expression",
             description = "Evaluates basic arithmetic expressions accurately.",
             parametersDescription = "expression: string (e.g. '128 * 1024')"
+        ),
+        MCPTool(
+            name = "edit_html_sandbox",
+            description = "Modifies the current session's HTML sandbox file for interactive mobile apps or games using exact old_string to new_string replacement. If the sandbox is empty (0 bytes), pass an empty string for old_string (\"\") to write the initial HTML code. For non-empty files, old_string must match exactly once in the file.",
+            parametersDescription = "JSON object with \"old_string\" and \"new_string\", e.g. {\"old_string\": \"\", \"new_string\": \"<!DOCTYPE html><html>...</html>\"}"
+        ),
+        MCPTool(
+            name = "read_html_sandbox",
+            description = "Reads a numbered section of lines from the current session's HTML sandbox file to inspect existing code before editing.",
+            parametersDescription = "JSON object with \"start_line\" (1-based integer) and \"limit\" (line count, default 50), e.g. {\"start_line\": 1, \"limit\": 100}"
         )
     )
 
@@ -67,6 +80,8 @@ class MCPToolExecutor(
                         success = true
                     )
                 }
+                "edit_html_sandbox" -> performEditHtmlSandbox(argument)
+                "read_html_sandbox" -> performReadHtmlSandbox(argument)
                 else -> {
                     ToolCallResponse(
                         toolName = toolName,
@@ -77,6 +92,73 @@ class MCPToolExecutor(
                 }
             }
         }
+    }
+
+    private fun performEditHtmlSandbox(argument: String): ToolCallResponse {
+        val sessionId = activeSessionId
+            ?: return ToolCallResponse(
+                toolName = "edit_html_sandbox",
+                argument = argument,
+                result = "Error: No active chat session found for HTML sandbox.",
+                success = false
+            )
+        val manager = htmlSandboxManager
+            ?: return ToolCallResponse(
+                toolName = "edit_html_sandbox",
+                argument = argument,
+                result = "Error: HTML sandbox manager is not initialized.",
+                success = false
+            )
+
+        val trimmed = argument.trim()
+        val oldString = MiniJson.getString(trimmed, "old_string", "target", "old")
+        val newString = MiniJson.getString(trimmed, "new_string", "replacement", "new")
+
+        if (!trimmed.contains("\"new_string\"") && !trimmed.contains("\"replacement\"") && !trimmed.contains("\"new\"")) {
+            return ToolCallResponse(
+                toolName = "edit_html_sandbox",
+                argument = argument,
+                result = "Invalid argument for edit_html_sandbox: missing \"new_string\". Expected JSON format: {\"old_string\": \"...\", \"new_string\": \"...\"}",
+                success = false
+            )
+        }
+
+        val (success, message) = manager.editSandbox(sessionId, oldString, newString)
+        return ToolCallResponse(
+            toolName = "edit_html_sandbox",
+            argument = argument,
+            result = message,
+            success = success
+        )
+    }
+
+    private fun performReadHtmlSandbox(argument: String): ToolCallResponse {
+        val sessionId = activeSessionId
+            ?: return ToolCallResponse(
+                toolName = "read_html_sandbox",
+                argument = argument,
+                result = "Error: No active chat session found for HTML sandbox.",
+                success = false
+            )
+        val manager = htmlSandboxManager
+            ?: return ToolCallResponse(
+                toolName = "read_html_sandbox",
+                argument = argument,
+                result = "Error: HTML sandbox manager is not initialized.",
+                success = false
+            )
+
+        val trimmed = argument.trim()
+        val startLine = MiniJson.getInt(trimmed, "start_line", "start", default = 1)
+        val limit = MiniJson.getInt(trimmed, "limit", "line_count", "count", default = 50)
+
+        val (success, message) = manager.readSandbox(sessionId, startLine, limit)
+        return ToolCallResponse(
+            toolName = "read_html_sandbox",
+            argument = argument,
+            result = message,
+            success = success
+        )
     }
 
     /**
@@ -365,3 +447,68 @@ private val NEWS_WORDS = listOf(
     "top stories",
     "happening"
 )
+
+internal object MiniJson {
+    fun getString(json: String, vararg keys: String): String {
+        for (key in keys) {
+            val pattern = Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+            val match = pattern.find(json)
+            if (match != null) {
+                return unescape(match.groupValues[1])
+            }
+        }
+        return ""
+    }
+
+    fun getInt(json: String, vararg keys: String, default: Int): Int {
+        for (key in keys) {
+            val pattern = Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*(\\d+)")
+            val match = pattern.find(json)
+            if (match != null) {
+                return match.groupValues[1].toIntOrNull() ?: default
+            }
+        }
+        return default
+    }
+
+    private fun unescape(s: String): String {
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '\\' && i + 1 < s.length) {
+                when (val next = s[i + 1]) {
+                    '"' -> { sb.append('"'); i += 2 }
+                    '\\' -> { sb.append('\\'); i += 2 }
+                    '/' -> { sb.append('/'); i += 2 }
+                    'b' -> { sb.append('\b'); i += 2 }
+                    'f' -> { sb.append('\u000C'); i += 2 }
+                    'n' -> { sb.append('\n'); i += 2 }
+                    'r' -> { sb.append('\r'); i += 2 }
+                    't' -> { sb.append('\t'); i += 2 }
+                    'u' -> {
+                        if (i + 5 < s.length) {
+                            val hex = s.substring(i + 2, i + 6)
+                            val code = hex.toIntOrNull(16)
+                            if (code != null) {
+                                sb.append(code.toChar())
+                                i += 6
+                                continue
+                            }
+                        }
+                        sb.append(c)
+                        i++
+                    }
+                    else -> {
+                        sb.append(next)
+                        i += 2
+                    }
+                }
+            } else {
+                sb.append(c)
+                i++
+            }
+        }
+        return sb.toString()
+    }
+}

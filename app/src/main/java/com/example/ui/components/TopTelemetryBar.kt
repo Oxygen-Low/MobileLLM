@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
@@ -60,6 +61,8 @@ fun TopTelemetryBar(
     memoryMb: Int,
     currentTps: Double,
     currentDate: String,
+    hasSandboxContent: Boolean = false,
+    onOpenSandbox: () -> Unit = {},
     onOpenModelsHub: () -> Unit,
     onToggleHistory: () -> Unit,
     onNewChat: () -> Unit,
@@ -117,8 +120,24 @@ fun TopTelemetryBar(
                     )
                 }
 
-                // Actions: New Chat, History
+                // Actions: Sandbox (when present), History, New Chat
                 Row(verticalAlignment = Alignment.CenterVertically) {
+
+                    if (hasSandboxContent) {
+                        IconButton(
+                            onClick = onOpenSandbox,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .testTag("sandbox_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SportsEsports,
+                                contentDescription = "Open Interactive HTML Sandbox",
+                                tint = TerminalGreen,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
 
                     // Chat History
                     IconButton(

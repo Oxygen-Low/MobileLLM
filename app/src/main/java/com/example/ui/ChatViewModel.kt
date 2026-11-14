@@ -25,6 +25,7 @@ import com.example.model.ReasoningLevel
 import com.example.model.SpeechEngineManager
 import com.example.model.SpeechEngineState
 import com.example.model.StoredTurn
+import com.example.tools.HtmlSandboxManager
 import com.example.tools.MCPToolExecutor
 import com.example.update.UpdateManager
 import kotlinx.coroutines.CancellationException
@@ -41,13 +42,15 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getInstance(application)
     private val repository = ChatRepository(database.chatDao())
-    val mcpToolExecutor = MCPToolExecutor()
+    val htmlSandboxManager = HtmlSandboxManager(File(application.filesDir, "sandboxes"))
+    val mcpToolExecutor = MCPToolExecutor(htmlSandboxManager = htmlSandboxManager)
     val modelEngineManager = ModelEngineManager(mcpToolExecutor)
     val downloadManager = ModelDownloadManager(application)
     val updateManager = UpdateManager(application)
@@ -114,6 +117,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
+
+    private val _sandboxContent = MutableStateFlow("")
+    val sandboxContent: StateFlow<String> = _sandboxContent.asStateFlow()
 
     val messages: StateFlow<List<ChatMessageEntity>> = _currentSessionId.flatMapLatest { sessionId ->
         if (sessionId != null) {
@@ -189,6 +195,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     inactivityJob?.cancel()
                     inactivityJob = null
+                }
+            }
+        }
+
+        // Keep sandbox file and activeSessionId synchronized with the selected chat session
+        viewModelScope.launch {
+            _currentSessionId.collect { sessionId ->
+                mcpToolExecutor.activeSessionId = sessionId
+                if (sessionId != null) {
+                    htmlSandboxManager.ensureSandboxExists(sessionId)
+                }
+                _sandboxContent.value = if (sessionId != null) {
+                    htmlSandboxManager.getSandboxContent(sessionId)
+                } else {
+                    ""
                 }
             }
         }
@@ -549,6 +570,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun createNewSession() {
         stopSpeaking()
         val newId = UUID.randomUUID().toString()
+        htmlSandboxManager.ensureSandboxExists(newId)
         val session = ChatSessionEntity(
             id = newId,
             title = "New Chat",
@@ -571,6 +593,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
+            htmlSandboxManager.deleteSandbox(sessionId)
             repository.deleteSession(sessionId)
             if (_currentSessionId.value == sessionId) {
                 clearStreamingState()
@@ -582,6 +605,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun clearAllSessions() {
         clearStreamingState()
         viewModelScope.launch {
+            val all = sessions.value
+            for (s in all) {
+                htmlSandboxManager.deleteSandbox(s.id)
+            }
             repository.clearAll()
             _currentSessionId.value = null
         }
@@ -634,6 +661,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             // Capture the conversation so far before the new user turn is stored.
             val history = loadHistory(activeSessionId)
+            mcpToolExecutor.activeSessionId = activeSessionId
 
             // 1. Insert User Message
             val userMsg = ChatMessageEntity(
@@ -701,6 +729,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             // it is complete.
                             val result = event.result
                             val sourceUrl = event.sourceUrl
+                            if (event.toolName == "edit_html_sandbox") {
+                                _sandboxContent.value = htmlSandboxManager.getSandboxContent(activeSessionId)
+                            }
                             agentSteps.value = agentSteps.value.map { step ->
                                 if (step.toolName == event.toolName && step.isRunning) {
                                     step.copy(
@@ -789,6 +820,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         speakReply(assistantMsg.id, replyText)
                     }
                 } finally {
+                    _sandboxContent.value = htmlSandboxManager.getSandboxContent(activeSessionId)
                     _isGenerating.value = false
 
                     // The streaming buffers are deliberately kept: the bubble
