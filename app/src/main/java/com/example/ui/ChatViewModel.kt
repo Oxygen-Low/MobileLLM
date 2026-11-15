@@ -24,6 +24,7 @@ import com.example.model.PromptFormat
 import com.example.model.ReasoningLevel
 import com.example.model.SpeechEngineManager
 import com.example.model.SpeechEngineState
+import com.example.model.SpeechModelProfile
 import com.example.model.StoredTurn
 import com.example.tools.HtmlSandboxManager
 import com.example.tools.MCPToolExecutor
@@ -79,6 +80,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val isListening: StateFlow<Boolean> = speechRecorder.isRecording
     val isTranscribing: StateFlow<Boolean> = speechEngineManager.isTranscribing
 
+    /** The Piper voices the user can pick from. */
+    val ttsVoices: List<SpeechModelProfile> = SpeechModelProfile.TEXT_TO_SPEECH_MODELS
+
+    /** The voice that is spoken with right now. */
+    val selectedTtsVoice: StateFlow<SpeechModelProfile> = speechEngineManager.ttsVoice
+
+    /** The voices that are already on the device. */
+    val downloadedTtsVoices: StateFlow<Set<String>> = speechEngineManager.downloadedVoices
+
     private val _speechError = MutableStateFlow<String?>(null)
     val speechError: StateFlow<String?> = _speechError.asStateFlow()
 
@@ -95,7 +105,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     private val _speakingMessageId = MutableStateFlow<String?>(null)
 
+    /**
+     * The voice that is being previewed right now, if any.
+     */
+    private val _previewingVoiceId = MutableStateFlow<String?>(null)
+    val previewingVoiceId: StateFlow<String?> = _previewingVoiceId.asStateFlow()
+
     private var speechJob: Job? = null
+    private var previewJob: Job? = null
     private var dictationJob: Job? = null
 
     val updateState = updateManager.state
@@ -471,6 +488,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Speaks with another Piper voice from now on. The weights are downloaded
+     * when they are not on the device yet.
+     */
+    fun selectTtsVoice(voice: SpeechModelProfile) {
+        _speechError.value = null
+        stopSpeaking()
+        viewModelScope.launch {
+            speechEngineManager.selectTtsVoice(voice)
+            scheduleInactivityUnload()
+        }
+    }
+
+    /** Downloads a voice without switching to it, so it can be previewed. */
+    fun downloadTtsVoice(voice: SpeechModelProfile) {
+        _speechError.value = null
+        viewModelScope.launch {
+            speechEngineManager.downloadVoice(voice)
+        }
+    }
+
+    /**
+     * Reads a short sample with the given voice so the user can hear it.
+     *
+     * The preview borrows the synthesizer, so it stops whatever was playing
+     * first and the app goes back to the selected voice afterwards.
+     */
+    fun previewTtsVoice(voice: SpeechModelProfile) {
+        _speechError.value = null
+        stopSpeaking()
+        previewJob = viewModelScope.launch {
+            _previewingVoiceId.value = voice.id
+            val audio = speechEngineManager.previewVoice(voice, voice.previewText)
+            if (audio == null) {
+                _speechError.value = speechEngineManager.ttsError.value
+                    ?: "Could not preview this voice"
+                _previewingVoiceId.value = null
+                scheduleInactivityUnload()
+                return@launch
+            }
+            speechPlayer.play(audio.samples, audio.sampleRate) {
+                _previewingVoiceId.value = null
+            }
+            scheduleInactivityUnload()
+        }
+    }
+
     /** Starts push-to-talk recording. Tapping the mic again stops it. */
     fun startListening() {
         if (!sttEnabled.value || isGenerationRunning()) return
@@ -563,8 +627,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun stopSpeaking() {
         speechJob?.cancel()
         speechJob = null
+        previewJob?.cancel()
+        previewJob = null
         speechPlayer.stop()
         _speakingMessageId.value = null
+        _previewingVoiceId.value = null
     }
 
     fun createNewSession() {

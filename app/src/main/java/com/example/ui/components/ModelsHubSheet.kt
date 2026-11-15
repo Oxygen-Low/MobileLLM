@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,9 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
@@ -41,6 +45,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,8 +91,15 @@ fun ModelsHubSheet(
     ttsState: SpeechEngineState,
     sttError: String?,
     ttsError: String?,
+    ttsVoices: List<SpeechModelProfile>,
+    selectedTtsVoice: SpeechModelProfile,
+    downloadedTtsVoices: Set<String>,
+    previewingTtsVoiceId: String?,
     onToggleStt: (Boolean) -> Unit,
     onToggleTts: (Boolean) -> Unit,
+    onSelectTtsVoice: (SpeechModelProfile) -> Unit,
+    onDownloadTtsVoice: (SpeechModelProfile) -> Unit,
+    onPreviewTtsVoice: (SpeechModelProfile) -> Unit,
     onSelectAndLoadModel: (ModelProfile) -> Unit,
     onUnloadModel: () -> Unit,
     onDownloadModel: (ModelProfile) -> Unit,
@@ -95,6 +110,10 @@ fun ModelsHubSheet(
     if (!isOpen) return
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // The voice list is long, so it stays folded away until the user asks
+    // for it.
+    var voicePickerExpanded by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -188,14 +207,99 @@ fun ModelsHubSheet(
                 item(key = "speech_tts") {
                     SpeechFeatureCard(
                         title = "Text to Speech",
-                        subtitle = "Piper Amy (int8) • offline read-aloud",
-                        model = SpeechModelProfile.PIPER_AMY_LOW,
+                        subtitle = "${selectedTtsVoice.name} • ${selectedTtsVoice.language} • offline read-aloud",
+                        model = selectedTtsVoice,
                         enabled = ttsEnabled,
                         state = ttsState,
                         error = ttsError,
-                        downloadInfo = downloadStates[SpeechModelProfile.PIPER_AMY_LOW.id],
-                        onToggle = onToggleTts
+                        downloadInfo = downloadStates[selectedTtsVoice.id],
+                        onToggle = onToggleTts,
+                        trailing = {
+                            IconButton(
+                                onClick = { onPreviewTtsVoice(selectedTtsVoice) },
+                                enabled = selectedTtsVoice.id in downloadedTtsVoices &&
+                                    previewingTtsVoiceId == null,
+                                modifier = Modifier.testTag("tts_preview_current")
+                            ) {
+                                if (previewingTtsVoiceId == selectedTtsVoice.id) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = TelemetryCyan
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Preview the current voice",
+                                        tint = TelemetryCyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
                     )
+                }
+
+                item(key = "speech_tts_voices") {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { voicePickerExpanded = !voicePickerExpanded }
+                                .testTag("tts_voice_picker_toggle"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "VOICES",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 1.sp
+                                ),
+                                color = TextMuted
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = selectedTtsVoice.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.5.sp,
+                                        color = TelemetryCyan
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(
+                                    imageVector = if (voicePickerExpanded) {
+                                        Icons.Default.ExpandLess
+                                    } else {
+                                        Icons.Default.ExpandMore
+                                    },
+                                    contentDescription = if (voicePickerExpanded) {
+                                        "Hide the voices"
+                                    } else {
+                                        "Show the voices"
+                                    },
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (voicePickerExpanded) {
+                            TtsVoiceList(
+                                voices = ttsVoices,
+                                selectedVoice = selectedTtsVoice,
+                                downloadedVoices = downloadedTtsVoices,
+                                downloadStates = downloadStates,
+                                previewingVoiceId = previewingTtsVoiceId,
+                                onSelectVoice = onSelectTtsVoice,
+                                onDownloadVoice = onDownloadTtsVoice,
+                                onPreviewVoice = onPreviewTtsVoice
+                            )
+                        }
+                    }
                 }
 
                 item(key = "models_header") {
@@ -266,7 +370,8 @@ private fun SpeechFeatureCard(
     state: SpeechEngineState,
     error: String?,
     downloadInfo: DownloadProgressInfo?,
-    onToggle: (Boolean) -> Unit
+    onToggle: (Boolean) -> Unit,
+    trailing: @Composable (() -> Unit)? = null
 ) {
     val activeDownload = downloadInfo?.takeIf { it.state == ModelDownloadState.DOWNLOADING }
     val status = when (state) {
@@ -340,6 +445,10 @@ private fun SpeechFeatureCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+                if (trailing != null) {
+                    trailing()
+                    Spacer(modifier = Modifier.width(4.dp))
                 }
                 Switch(
                     checked = enabled,

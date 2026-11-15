@@ -11,8 +11,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -52,6 +50,14 @@ class ModelDownloadManager(
 
     /** Speech models are directories, so they live next to the GGUF files. */
     val speechDir = File(context.filesDir, "speech").apply { mkdirs() }
+
+    /**
+     * The espeak-ng data that turns text into phonemes.
+     *
+     * Every Piper archive ships the very same data set, so it is stored once
+     * for all of the voices instead of once per voice.
+     */
+    val espeakDir = File(speechDir, SpeechModelProfile.ESPEAK_DIR_NAME)
 
     private val _downloadStates = MutableStateFlow<Map<String, DownloadProgressInfo>>(emptyMap())
     val downloadStates: StateFlow<Map<String, DownloadProgressInfo>> = _downloadStates.asStateFlow()
@@ -173,7 +179,14 @@ class ModelDownloadManager(
 
         val archive = File(speechDir, "${profile.id}.tar.bz2")
         val part = File(speechDir, "${profile.id}.tar.bz2.part")
-        val expectedBytes = profile.downloadSizeMb.toLong() * 1024L * 1024L
+        // The exact size of the release tells a complete file from a
+        // truncated one, so a download that broke off is not mistaken for a
+        // finished one.
+        val expectedBytes = if (profile.archiveSizeBytes > 0) {
+            profile.archiveSizeBytes
+        } else {
+            profile.downloadSizeMb.toLong() * 1024L * 1024L
+        }
 
         try {
             if (!archive.isFile || archive.length() == 0L) {
@@ -271,50 +284,7 @@ class ModelDownloadManager(
      * outside of the app's private storage.
      */
     private fun extractSpeechArchive(archive: File, profile: SpeechModelProfile) {
-        val temp = File(speechDir, "${profile.id}.extracting")
-        temp.deleteRecursively()
-        if (!temp.mkdirs()) throw IOException("Could not create ${temp.name}")
-
-        val root = temp.canonicalFile
-        try {
-            TarArchiveInputStream(
-                BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archive)))
-            ).use { tar ->
-                var entry = tar.nextEntry
-                while (entry != null) {
-                    val output = File(temp, entry.name).canonicalFile
-                    if (!output.path.startsWith(root.path + File.separator) && output != root) {
-                        throw IOException("Unsafe path in speech archive: ${entry.name}")
-                    }
-
-                    if (entry.isDirectory) {
-                        output.mkdirs()
-                    } else {
-                        output.parentFile?.mkdirs()
-                        FileOutputStream(output).use { stream -> tar.copyTo(stream) }
-                    }
-                    entry = tar.nextEntry
-                }
-            }
-
-            val children = temp.listFiles().orEmpty()
-            val source = children.singleOrNull()?.takeIf { it.isDirectory } ?: temp
-
-            // Drop unquantised duplicates and sample audio that the runtime
-            // never reads; speech storage is scarce next to the LLM weights.
-            for (relative in profile.prunedFiles) {
-                File(source, relative).deleteRecursively()
-            }
-
-            val destination = getSpeechModelDir(profile.id)
-            destination.deleteRecursively()
-            if (!source.renameTo(destination)) {
-                source.copyRecursively(destination, overwrite = true)
-                source.deleteRecursively()
-            }
-        } finally {
-            temp.deleteRecursively()
-        }
+        SpeechArchiveExtractor(speechDir, espeakDir).extract(archive, profile)
     }
 
     fun deleteSpeechModel(modelId: String): Boolean {
@@ -324,6 +294,30 @@ class ModelDownloadManager(
         File(speechDir, "$modelId.extracting").deleteRecursively()
         _downloadStates.value = _downloadStates.value.toMutableMap().apply { remove(modelId) }
         return deleted
+    }
+
+    /**
+     * Moves the espeak-ng data of an older install into the shared place.
+     *
+     * Earlier versions kept a copy of the data inside every voice directory.
+     * They all hold the same files, so the first one found is enough.
+     */
+    fun migrateSharedEspeakData() {
+        // A half extracted directory is treated as missing, so the data is
+        // taken from a voice directory again instead of staying broken.
+        if (SpeechModelProfile.espeakIsReady(speechDir)) return
+
+        for (profile in SpeechModelProfile.ALL_MODELS) {
+            val inside = File(getSpeechModelDir(profile.id), SpeechModelProfile.ESPEAK_DIR_NAME)
+            if (!inside.isDirectory) continue
+
+            espeakDir.parentFile?.mkdirs()
+            if (!inside.renameTo(espeakDir)) {
+                inside.copyRecursively(espeakDir, overwrite = true)
+                inside.deleteRecursively()
+            }
+            if (SpeechModelProfile.espeakIsReady(speechDir)) return
+        }
     }
 
     /**

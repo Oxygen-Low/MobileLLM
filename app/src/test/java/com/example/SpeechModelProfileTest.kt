@@ -48,7 +48,7 @@ class SpeechModelProfileTest {
     }
 
     @Test
-    fun `the piper model needs its espeak data`() {
+    fun `a voice without the shared espeak data is not ready`() {
         val root = folder.newFolder("speech")
         val model = SpeechModelProfile.PIPER_AMY_LOW
         val dir = model.modelDir(root)
@@ -58,8 +58,40 @@ class SpeechModelProfileTest {
 
         assertFalse(model.isReady(root))
 
-        File(dir, "espeak-ng-data").mkdirs()
-        File(dir, "espeak-ng-data/en_dict").writeText("dict")
+        writeEspeakData(root)
         assertTrue(model.isReady(root))
+    }
+
+    @Test
+    fun `a voice shares the espeak data with the other voices`() {
+        val root = folder.newFolder("speech")
+        val amy = SpeechModelProfile.PIPER_AMY_LOW
+        val ryan = SpeechModelProfile.TEXT_TO_SPEECH_MODELS
+            .first { it.id != amy.id && it.locale == "en_US" }
+
+        listOf(amy, ryan).forEach { model ->
+            val dir = model.modelDir(root)
+            dir.mkdirs()
+            File(dir, model.voiceFile!!).writeText("weights")
+            File(dir, "tokens.txt").writeText("tokens")
+        }
+
+        // Neither voice is ready before the shared data is there.
+        assertFalse(amy.isReady(root))
+        assertFalse(ryan.isReady(root))
+
+        writeEspeakData(root)
+
+        // One copy of the data is enough for every voice.
+        assertTrue(amy.isReady(root))
+        assertTrue(ryan.isReady(root))
+        assertTrue(SpeechModelProfile.espeakDir(root).isDirectory)
+    }
+
+    /** Writes the tables of the espeak-ng data that every voice needs. */
+    private fun writeEspeakData(root: File) {
+        val espeak = SpeechModelProfile.espeakDir(root)
+        espeak.mkdirs()
+        SpeechModelProfile.ESPEAK_CORE_FILES.forEach { File(espeak, it).writeText("data") }
     }
 }

@@ -18,8 +18,14 @@ class SpeechPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_TTS_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_TTS_ENABLED, value).apply()
 
+    /** The id of the Piper voice the user picked. */
+    var textToSpeechVoiceId: String
+        get() = prefs.getString(KEY_TTS_VOICE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_TTS_VOICE, value).apply()
+
     private companion object {
         const val KEY_STT_ENABLED = "stt_enabled"
         const val KEY_TTS_ENABLED = "tts_enabled"
+        const val KEY_TTS_VOICE = "tts_voice"
     }
 }

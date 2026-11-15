@@ -117,6 +117,9 @@ fun ChatScreen(
     val isListening by viewModel.isListening.collectAsStateWithLifecycle()
     val isTranscribing by viewModel.isTranscribing.collectAsStateWithLifecycle()
     val transcribedText by viewModel.transcribedText.collectAsStateWithLifecycle()
+    val selectedTtsVoice by viewModel.selectedTtsVoice.collectAsStateWithLifecycle()
+    val downloadedTtsVoices by viewModel.downloadedTtsVoices.collectAsStateWithLifecycle()
+    val previewingTtsVoiceId by viewModel.previewingVoiceId.collectAsStateWithLifecycle()
 
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
@@ -533,8 +536,15 @@ fun ChatScreen(
         ttsState = ttsState,
         sttError = sttError,
         ttsError = ttsError,
+        ttsVoices = viewModel.ttsVoices,
+        selectedTtsVoice = selectedTtsVoice,
+        downloadedTtsVoices = downloadedTtsVoices,
+        previewingTtsVoiceId = previewingTtsVoiceId,
         onToggleStt = { viewModel.setSpeechToTextEnabled(it) },
         onToggleTts = { viewModel.setTextToSpeechEnabled(it) },
+        onSelectTtsVoice = { viewModel.selectTtsVoice(it) },
+        onDownloadTtsVoice = { viewModel.downloadTtsVoice(it) },
+        onPreviewTtsVoice = { viewModel.previewTtsVoice(it) },
         onSelectAndLoadModel = { viewModel.loadModel(it) },
         onUnloadModel = { viewModel.unloadModel() },
         onDownloadModel = { viewModel.downloadModel(it) },
