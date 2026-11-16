@@ -303,7 +303,7 @@ internal object ToolCallParser {
         val objMatch = Regex("\"(?:arguments?|params|parameters)\"\\s*:\\s*(\\{[\\s\\S]*?\\})").find(text)
         if (objMatch != null) {
             val inner = objMatch.groupValues[1].trim()
-            if (canonical in setOf("edit_html_sandbox", "read_html_sandbox", "generate_image")) {
+            if (canonical in setOf("edit_html_sandbox", "read_html_sandbox", "generate_image", "generate_video")) {
                 return ToolCallDetector.ParsedToolCall(canonical, inner)
             }
         }

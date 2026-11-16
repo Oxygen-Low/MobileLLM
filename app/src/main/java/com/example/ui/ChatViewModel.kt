@@ -33,10 +33,15 @@ import com.example.model.SpeechEngineManager
 import com.example.model.SpeechEngineState
 import com.example.model.SpeechModelProfile
 import com.example.model.StoredTurn
+import com.example.model.VideoEngineManager
+import com.example.model.VideoEngineState
+import com.example.model.VideoModelProfile
 import com.example.tools.HtmlSandboxManager
 import com.example.tools.MCPToolExecutor
 import com.example.tools.ToolCallResponse
 import com.example.update.UpdateManager
+import com.example.video.GeneratedVideoStore
+import com.example.video.VideoPromptParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -52,6 +57,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -99,6 +105,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val downloadedImageModels: StateFlow<Set<String>> = imageEngineManager.downloaded
     val imageState: StateFlow<ImageEngineState> = imageEngineManager.state
     val imageError: StateFlow<String?> = imageEngineManager.error
+
+    /**
+     * The clips the chats generated. They share the per-session folders with
+     * the pictures: the two stores only ever look at their own extension, and
+     * deleting a chat removes both.
+     */
+    val generatedVideoStore = GeneratedVideoStore(File(application.filesDir, "generated"))
+
+    /**
+     * The video model. It is loaded only while a clip is rendered and released
+     * again before the encoder runs, so an 8 GB checkpoint never competes with
+     * the chat model for memory.
+     */
+    val videoEngineManager = VideoEngineManager(application, downloadManager, generatedVideoStore)
+
+    /** The video models the user can pick from. */
+    val videoModels: List<VideoModelProfile> = VideoModelProfile.MODELS
+
+    val selectedVideoModel: StateFlow<VideoModelProfile> = videoEngineManager.selected
+    val downloadedVideoModels: StateFlow<Set<String>> = videoEngineManager.downloaded
+    val videoState: StateFlow<VideoEngineState> = videoEngineManager.state
+    val videoError: StateFlow<String?> = videoEngineManager.error
 
     val sttEnabled: StateFlow<Boolean> = speechEngineManager.sttEnabled
     val ttsEnabled: StateFlow<Boolean> = speechEngineManager.ttsEnabled
@@ -255,12 +283,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         checkDownloadedModels()
         speechEngineManager.refresh()
         imageEngineManager.refresh()
+        videoEngineManager.refresh()
 
         // Drawing a picture needs the chat weights out of memory first, which
         // only this side can arrange: the engine releases its own handle, runs
         // this hook and loads the chat model back afterwards.
         modelEngineManager.imageGeneration = { argument, sessionId ->
             generateImageForTool(argument, sessionId)
+        }
+        // Rendering a clip needs the same arrangement.
+        modelEngineManager.videoGeneration = { argument, sessionId ->
+            generateVideoForTool(argument, sessionId)
         }
 
         // Keep the inactivity timer in sync with the engine: schedule it whenever
@@ -375,6 +408,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         downloadManager.publishCancelled(modelId)
         speechEngineManager.onDownloadCancelled(modelId)
         imageEngineManager.onDownloadCancelled(modelId)
+        videoEngineManager.onDownloadCancelled(modelId)
     }
 
     /**
@@ -532,6 +566,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             speechRecorder.cancel()
             speechEngineManager.releaseEngines()
             imageEngineManager.unload()
+            videoEngineManager.unload()
         }
         viewModelScope.launch {
             modelEngineManager.unloadModel()
@@ -765,6 +800,67 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return generatedImageStore.dataUri(session, id)
     }
 
+    // ---------------------------------------------------------------------
+    // Video generation
+    // ---------------------------------------------------------------------
+
+    /**
+     * Picks the model clips are rendered with and fetches its weights when they
+     * are not on the device yet. The weights stay on disk until a clip is
+     * actually requested.
+     */
+    fun selectVideoModel(model: VideoModelProfile) {
+        if (model.id == videoEngineManager.selected.value.id) return
+        videoEngineManager.clearError()
+        launchDownload(model.id) {
+            videoEngineManager.selectModel(model)
+            videoEngineManager.downloadModel(model)
+        }
+    }
+
+    /** Downloads video weights without picking them. */
+    fun downloadVideoModel(model: VideoModelProfile) {
+        videoEngineManager.clearError()
+        launchDownload(model.id) {
+            videoEngineManager.downloadModel(model)
+        }
+    }
+
+    /** Removes video weights from the device. */
+    fun deleteVideoModel(model: VideoModelProfile) {
+        videoEngineManager.clearError()
+        val download = downloadJobs.remove(model.id)
+        viewModelScope.launch {
+            download?.let { job ->
+                job.cancel()
+                job.join()
+            }
+            videoEngineManager.onDownloadCancelled(model.id)
+            videoEngineManager.deleteModel(model)
+        }
+    }
+
+    /** Releases the video weights without touching the chat model. */
+    fun unloadVideoModel() {
+        viewModelScope.launch { videoEngineManager.unload() }
+    }
+
+    fun dismissVideoError() {
+        videoEngineManager.clearError()
+    }
+
+    /** The file of a generated clip of the current chat, or null. */
+    fun generatedVideoFile(id: String): File? {
+        val session = _currentSessionId.value ?: return null
+        return generatedVideoStore.fileFor(session, id)
+    }
+
+    /** A `data:` URI for a generated clip, used inside the HTML sandbox. */
+    fun generatedVideoDataUri(id: String): String? {
+        val session = _currentSessionId.value ?: return null
+        return generatedVideoStore.dataUri(session, id)
+    }
+
     /**
      * Draws a picture for the `generate_image` tool.
      *
@@ -815,6 +911,72 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 append("\nReference: ").append(image.token)
                 append("\nShow it in your reply as ![description](").append(image.token).append(')')
                 append(" or in the HTML sandbox as <img src=\"").append(image.token).append("\">.")
+            },
+            success = true
+        )
+    }
+
+    /**
+     * Renders a clip for the `generate_video` tool.
+     *
+     * Called by [ModelEngineManager] after it released the chat weights, just
+     * like [generateImageForTool]. The reply names the token and tells the
+     * model how to show the clip, because the model only ever sees the token.
+     */
+    private suspend fun generateVideoForTool(argument: String, sessionId: String?): ToolCallResponse {
+        val session = sessionId ?: _currentSessionId.value
+        if (session == null) {
+            return ToolCallResponse(
+                toolName = "generate_video",
+                argument = argument,
+                result = "Error: there is no active chat to store the clip in.",
+                success = false
+            )
+        }
+
+        val model = videoEngineManager.selected.value
+        val request = VideoPromptParser.parse(
+            argument = argument,
+            defaultSize = model.resolution,
+            defaultFps = model.frameRate,
+            defaultSeconds = model.durationSeconds,
+            defaultSteps = model.steps
+        )
+        if (request.prompt.isBlank()) {
+            return ToolCallResponse(
+                toolName = "generate_video",
+                argument = argument,
+                result = "Error: the video description was empty. Call generate_video with {\"prompt\": \"...\"}.",
+                success = false
+            )
+        }
+
+        val clip = videoEngineManager.generate(request, session)
+        if (clip == null) {
+            return ToolCallResponse(
+                toolName = "generate_video",
+                argument = argument,
+                result = "The clip could not be generated: " +
+                    (videoEngineManager.error.value ?: "unknown error") + ".",
+                success = false
+            )
+        }
+
+        return ToolCallResponse(
+            toolName = "generate_video",
+            argument = argument,
+            result = buildString {
+                append("Video generated with ").append(model.name).append('.')
+                append("\nDescription: ").append(request.prompt)
+                append("\nSize: ").append(request.width).append('x').append(request.height)
+                append(" at ").append(request.fps).append(" fps")
+                append("\nDuration: ").append(request.frameCount).append(" frames (")
+                    .append(String.format(Locale.US, "%.1f", request.durationSeconds))
+                    .append(" s) with a synchronized soundtrack.")
+                append("\nReference: ").append(clip.token)
+                append("\nShow it in your reply as [description](").append(clip.token).append(')')
+                append(" or in the HTML sandbox as <video src=\"").append(clip.token)
+                    .append("\" controls></video>.")
             },
             success = true
         )
@@ -949,6 +1111,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             htmlSandboxManager.deleteSandbox(sessionId)
             generatedImageStore.deleteSession(sessionId)
+            generatedVideoStore.deleteSession(sessionId)
             repository.deleteSession(sessionId)
             if (_currentSessionId.value == sessionId) {
                 clearStreamingState()
@@ -965,6 +1128,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 htmlSandboxManager.deleteSandbox(s.id)
             }
             generatedImageStore.deleteAll()
+            generatedVideoStore.deleteAll()
             repository.clearAll()
             _currentSessionId.value = null
         }

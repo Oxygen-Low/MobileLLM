@@ -32,7 +32,7 @@ enum class ModelHubTab(val title: String) {
      * Those tabs only show a placeholder instead of a list of weights.
      */
     val isWorkInProgress: Boolean
-        get() = this == MUSIC || this == VIDEO
+        get() = this == MUSIC
 
     companion object {
         /**

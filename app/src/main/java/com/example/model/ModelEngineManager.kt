@@ -97,6 +97,12 @@ class ModelEngineManager(
      */
     var imageGeneration: (suspend (prompt: String, sessionId: String?) -> ToolCallResponse)? = null
 
+    /**
+     * Generates a clip with the video engine while the chat weights are out of
+     * memory. Installed by the view model next to [imageGeneration].
+     */
+    var videoGeneration: (suspend (prompt: String, sessionId: String?) -> ToolCallResponse)? = null
+
     private val _loadState = MutableStateFlow(ModelLoadState.UNLOADED)
     val loadState: StateFlow<ModelLoadState> = _loadState.asStateFlow()
 
@@ -341,14 +347,18 @@ class ModelEngineManager(
     /**
      * Runs one tool call.
      *
-     * A picture is the one call the executor cannot answer on its own: the
-     * chat model and the image model do not fit in memory together, so the
-     * weights are released, the picture is drawn and the chat model is brought
-     * back, all before the model continues the same turn.
+     * A picture or a clip is the one kind of call the executor cannot answer on
+     * its own: the chat model and a generation model do not fit in memory
+     * together, so the weights are released, the media is generated and the
+     * chat model is brought back, all before the model continues the same turn.
      */
     private suspend fun executeToolCall(toolName: String, argument: String): ToolCallResponse {
-        val generator = imageGeneration
-        if (toolName != "generate_image" || generator == null) {
+        val generator = when (toolName) {
+            "generate_image" -> imageGeneration
+            "generate_video" -> videoGeneration
+            else -> null
+        }
+        if (generator == null) {
             return mcpToolExecutor.executeTool(toolName, argument)
         }
 
@@ -356,7 +366,7 @@ class ModelEngineManager(
         val file = currentModelFile
         val sessionId = mcpToolExecutor.activeSessionId
 
-        // Free the chat weights first so the image model has the memory.
+        // Free the chat weights first so the generation model has the memory.
         loadMutex.withLock { releaseEngine() }
         _loadState.value = ModelLoadState.UNLOADED
         _currentTps.value = 0.0
@@ -365,7 +375,7 @@ class ModelEngineManager(
         return try {
             generator(argument, sessionId)
         } finally {
-            // Bring the conversation back, also when the picture failed.
+            // Bring the conversation back, also when the media failed.
             if (profile != null && file != null) {
                 loadModel(profile, file)
             }
@@ -578,6 +588,7 @@ class ModelEngineManager(
         builder.append("\n- When modifying an existing sandbox, read it first with `read_html_sandbox` if needed, then use `edit_html_sandbox` with the exact unique `old_string` and the updated `new_string`.")
         builder.append("\nCall a tool whenever the answer depends on live information, the current date or time, arithmetic, or creating/editing an HTML sandbox app.")
         builder.append("\nTo draw a picture, call generate_image with the description. The result names a reference token: show the picture in your reply as ![description](gen:ID) or in the HTML sandbox as <img src=\"gen:ID\">. Never invent an id, only use the one the tool returned.")
+        builder.append("\nTo generate a short video with sound, call generate_video with what happens in the clip. The result names a reference token: show the clip in your reply as [description](vid:ID) or in the HTML sandbox as <video src=\"vid:ID\" controls></video>. Never invent an id, only use the one the tool returned.")
         return builder.toString()
     }
 

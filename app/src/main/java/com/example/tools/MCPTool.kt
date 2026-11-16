@@ -19,6 +19,7 @@ fun toolDisplayName(toolName: String?): String = when (toolName) {
     "edit_html_sandbox" -> "Edit HTML Sandbox"
     "read_html_sandbox" -> "Read HTML Sandbox"
     "generate_image" -> "Image Generation"
+    "generate_video" -> "Video Generation"
     null -> "Tool"
     else -> toolName
 }

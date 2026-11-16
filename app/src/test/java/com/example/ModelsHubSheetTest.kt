@@ -14,6 +14,8 @@ import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.model.SpeechEngineState
 import com.example.model.SpeechModelProfile
+import com.example.model.VideoEngineState
+import com.example.model.VideoModelProfile
 import com.example.ui.components.ModelsHubSheet
 import org.junit.Rule
 import org.junit.Test
@@ -51,11 +53,9 @@ class ModelsHubSheetTest {
     fun `the tabs without models yet show a placeholder`() {
         showHub()
 
-        listOf(ModelHubTab.MUSIC, ModelHubTab.VIDEO).forEach { tab ->
-            selectTab(tab)
-            composeTestRule.onNodeWithTag("hub_work_in_progress").assertIsDisplayed()
-            composeTestRule.onNodeWithText("Work In Progress!").assertIsDisplayed()
-        }
+        selectTab(ModelHubTab.MUSIC)
+        composeTestRule.onNodeWithTag("hub_work_in_progress").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Work In Progress!").assertIsDisplayed()
     }
 
     @Test
@@ -67,6 +67,25 @@ class ModelsHubSheetTest {
         composeTestRule.onNodeWithTag("image_model_${ImageModelProfile.SD_TURBO.id}").assertIsDisplayed()
         composeTestRule.onNodeWithTag("image_model_${ImageModelProfile.SD_V1_5.id}").assertIsDisplayed()
         // Image generation is implemented, so the tab is not a placeholder.
+        composeTestRule.onNodeWithTag("hub_work_in_progress").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the video tab holds the video models and marks the ones with sound`() {
+        showHub()
+
+        selectTab(ModelHubTab.VIDEO)
+        scrollTo("video_model_${VideoModelProfile.LTX_2_5_DISTILLED.id}")
+        composeTestRule.onNodeWithTag("video_model_${VideoModelProfile.LTX_2_5_DISTILLED.id}")
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(
+            "video_sound_${VideoModelProfile.LTX_2_5_DISTILLED.id}",
+            useUnmergedTree = true
+        ).assertIsDisplayed()
+        scrollTo("video_model_${VideoModelProfile.LTX_2_5.id}")
+        composeTestRule.onNodeWithTag("video_model_${VideoModelProfile.LTX_2_5.id}")
+            .assertIsDisplayed()
+        // Video generation is implemented, so the tab is not a placeholder.
         composeTestRule.onNodeWithTag("hub_work_in_progress").assertDoesNotExist()
     }
 
@@ -125,6 +144,11 @@ class ModelsHubSheetTest {
                 downloadedImageModels = emptySet(),
                 imageState = ImageEngineState.NOT_DOWNLOADED,
                 imageError = null,
+                videoModels = VideoModelProfile.MODELS,
+                selectedVideoModel = VideoModelProfile.DEFAULT_VIDEO_MODEL,
+                downloadedVideoModels = emptySet(),
+                videoState = VideoEngineState.NOT_DOWNLOADED,
+                videoError = null,
                 onToggleStt = {},
                 onToggleTts = {},
                 onSelectTtsVoice = {},

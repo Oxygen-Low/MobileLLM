@@ -57,7 +57,7 @@ add_subdirectory(llama.cpp)
 # ---------------------------------------------------------------------------
 # JNI bridge
 # ---------------------------------------------------------------------------
-add_library(mobilellm SHARED llama_jni.cpp image_jni.cpp)
+add_library(mobilellm SHARED llama_jni.cpp image_jni.cpp video_jni.cpp)
 
 target_link_libraries(mobilellm PRIVATE llama ggml)
 

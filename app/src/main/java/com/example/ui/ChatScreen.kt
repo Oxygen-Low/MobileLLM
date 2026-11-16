@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.example.data.ChatMessageEntity
 import com.example.image.GeneratedImageReferences
+import com.example.video.GeneratedVideoReferences
 import com.example.model.ModelDownloadState
 import com.example.model.ModelLoadState
 import com.example.ui.components.AgentStepItem
@@ -129,19 +130,30 @@ fun ChatScreen(
     val imageState by viewModel.imageState.collectAsStateWithLifecycle()
     val imageError by viewModel.imageError.collectAsStateWithLifecycle()
 
+    // Video generation. The model is released again before the clip is muxed.
+    val videoModels = viewModel.videoModels
+    val selectedVideoModel by viewModel.selectedVideoModel.collectAsStateWithLifecycle()
+    val downloadedVideoModels by viewModel.downloadedVideoModels.collectAsStateWithLifecycle()
+    val videoState by viewModel.videoState.collectAsStateWithLifecycle()
+    val videoError by viewModel.videoError.collectAsStateWithLifecycle()
+
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
     val agentSteps by viewModel.agentSteps.collectAsStateWithLifecycle()
     val persistedReplyId by viewModel.persistedReplyId.collectAsStateWithLifecycle()
     val sandboxContent by viewModel.sandboxContent.collectAsStateWithLifecycle()
 
-    // The sandbox and the replies can reference generated pictures by their
-    // token. The WebView cannot read the app's files, so the pictures are
-    // inlined as data: URIs right before they are handed to it.
+    // The sandbox and the replies can reference generated media by their
+    // token. The WebView cannot read the app's files, so the media is inlined
+    // as data: URIs right before it is handed to it.
     val resolvedSandboxContent = remember(sandboxContent, currentSessionId) {
-        GeneratedImageReferences.inline(sandboxContent) { id -> viewModel.generatedImageDataUri(id) }
+        val withImages = GeneratedImageReferences.inline(sandboxContent) { id ->
+            viewModel.generatedImageDataUri(id)
+        }
+        GeneratedVideoReferences.inline(withImages) { id -> viewModel.generatedVideoDataUri(id) }
     }
     val generatedImageResolver: (String) -> java.io.File? = { id -> viewModel.generatedImageFile(id) }
+    val generatedVideoResolver: (String) -> java.io.File? = { id -> viewModel.generatedVideoFile(id) }
 
     var isHistoryOpen by remember { mutableStateOf(false) }
     var isModelsHubOpen by remember { mutableStateOf(false) }
@@ -495,7 +507,8 @@ fun ChatScreen(
                             showRegenerate = !isGenerating && message.role == "assistant" && isLastMessage,
                             onRewind = { viewModel.rewindToMessage(message.id) },
                             onRegenerate = { viewModel.regenerateLastResponse() },
-                            imageResolver = generatedImageResolver
+                            imageResolver = generatedImageResolver,
+                            videoResolver = generatedVideoResolver
                         )
                     }
 
@@ -531,7 +544,8 @@ fun ChatScreen(
                                 modelName = currentModel.shortName,
                                 isStreaming = true,
                                 showThinkingPlaceholder = placeholder,
-                                imageResolver = generatedImageResolver
+                                imageResolver = generatedImageResolver,
+                                videoResolver = generatedVideoResolver
                             )
                         }
                     }
@@ -563,6 +577,11 @@ fun ChatScreen(
         downloadedImageModels = downloadedImageModels,
         imageState = imageState,
         imageError = imageError,
+        videoModels = videoModels,
+        selectedVideoModel = selectedVideoModel,
+        downloadedVideoModels = downloadedVideoModels,
+        videoState = videoState,
+        videoError = videoError,
         onToggleStt = { viewModel.setSpeechToTextEnabled(it) },
         onToggleTts = { viewModel.setTextToSpeechEnabled(it) },
         onSelectTtsVoice = { viewModel.selectTtsVoice(it) },
@@ -577,7 +596,10 @@ fun ChatScreen(
         onCancelDownload = { viewModel.cancelDownload(it) },
         onSelectImageModel = { viewModel.selectImageModel(it) },
         onDownloadImageModel = { viewModel.downloadImageModel(it) },
-        onDeleteImageModel = { viewModel.deleteImageModel(it) }
+        onDeleteImageModel = { viewModel.deleteImageModel(it) },
+        onSelectVideoModel = { viewModel.selectVideoModel(it) },
+        onDownloadVideoModel = { viewModel.downloadVideoModel(it) },
+        onDeleteVideoModel = { viewModel.deleteVideoModel(it) }
     )
 
     // Chat History Drawer Modal

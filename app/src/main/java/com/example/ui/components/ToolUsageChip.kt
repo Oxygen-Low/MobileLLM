@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -247,5 +248,6 @@ private fun toolIcon(toolName: String?): ImageVector = when (toolName) {
     "get_current_datetime" -> Icons.Default.Schedule
     "calculate_expression" -> Icons.Default.Calculate
     "generate_image" -> Icons.Default.Image
+    "generate_video" -> Icons.Default.Videocam
     else -> Icons.Default.Build
 }

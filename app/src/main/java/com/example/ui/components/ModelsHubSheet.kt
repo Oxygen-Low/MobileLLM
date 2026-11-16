@@ -65,6 +65,8 @@ import com.example.model.ModelProfile
 import com.example.model.SpeechEngineState
 import com.example.model.SpeechModelKind
 import com.example.model.SpeechModelProfile
+import com.example.model.VideoEngineState
+import com.example.model.VideoModelProfile
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
 import com.example.ui.theme.ErrorRed
@@ -100,6 +102,11 @@ fun ModelsHubSheet(
     downloadedImageModels: Set<String> = emptySet(),
     imageState: ImageEngineState = ImageEngineState.UNLOADED,
     imageError: String? = null,
+    videoModels: List<VideoModelProfile> = emptyList(),
+    selectedVideoModel: VideoModelProfile? = null,
+    downloadedVideoModels: Set<String> = emptySet(),
+    videoState: VideoEngineState = VideoEngineState.UNLOADED,
+    videoError: String? = null,
     onToggleStt: (Boolean) -> Unit,
     onToggleTts: (Boolean) -> Unit,
     onSelectTtsVoice: (SpeechModelProfile) -> Unit,
@@ -115,6 +122,9 @@ fun ModelsHubSheet(
     onSelectImageModel: (ImageModelProfile) -> Unit = {},
     onDownloadImageModel: (ImageModelProfile) -> Unit = {},
     onDeleteImageModel: (ImageModelProfile) -> Unit = {},
+    onSelectVideoModel: (VideoModelProfile) -> Unit = {},
+    onDownloadVideoModel: (VideoModelProfile) -> Unit = {},
+    onDeleteVideoModel: (VideoModelProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (!isOpen) return
@@ -397,8 +407,58 @@ fun ModelsHubSheet(
                         }
                     }
 
-                    ModelHubTab.MUSIC,
                     ModelHubTab.VIDEO -> {
+                        item(key = "video_header") {
+                            Column {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                SectionHeader("ON-DEVICE VIDEO GENERATION WITH SOUND")
+                            }
+                        }
+
+                        item(key = "video_models") {
+                            Column {
+                                val model = selectedVideoModel
+                                if (model != null) {
+                                    Text(
+                                        text = "CLIPS ARE RENDERED WITH ${model.name.uppercase()} AND ITS SOUNDTRACK",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            letterSpacing = 0.5.sp
+                                        ),
+                                        color = TextMuted
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                                VideoModelList(
+                                    models = videoModels,
+                                    selectedModel = selectedVideoModel,
+                                    downloadedModels = downloadedVideoModels,
+                                    downloadStates = downloadStates,
+                                    onSelectModel = onSelectVideoModel,
+                                    onDownloadModel = onDownloadVideoModel,
+                                    onDeleteModel = onDeleteVideoModel,
+                                    onCancelDownload = { video -> onCancelDownload(video.id) }
+                                )
+                                val videoMessage = videoError ?: downloadStates[selectedVideoModel?.id]
+                                    ?.takeIf { it.state == ModelDownloadState.ERROR }
+                                    ?.error
+                                if (videoMessage != null && videoState == VideoEngineState.ERROR) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = videoMessage,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = ErrorRed
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    ModelHubTab.MUSIC -> {
                         item(key = "work_in_progress") {
                             WorkInProgressPanel(title = selectedTab.title)
                         }

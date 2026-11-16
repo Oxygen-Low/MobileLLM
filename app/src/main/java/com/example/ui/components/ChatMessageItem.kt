@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.ChatMessageEntity
 import com.example.image.Base64Codec
 import com.example.image.GeneratedImageReferences
+import com.example.video.GeneratedVideoReferences
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
@@ -90,7 +91,9 @@ fun ChatMessageItem(
     onRewind: () -> Unit = {},
     onRegenerate: () -> Unit = {},
     /** Resolves a `gen:<id>` reference to the file of a generated picture. */
-    imageResolver: ((String) -> File?)? = null
+    imageResolver: ((String) -> File?)? = null,
+    /** Resolves a `vid:<id>` reference to the file of a generated clip. */
+    videoResolver: ((String) -> File?)? = null
 ) {
     val context = LocalContext.current
     val isUser = message.role == "user"
@@ -184,7 +187,7 @@ fun ChatMessageItem(
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                     ) {
                         // Render rich text and syntax highlighted code blocks
-                        RichMessageContent(content = message.content, imageResolver = imageResolver)
+                        RichMessageContent(content = message.content, imageResolver = imageResolver, videoResolver = videoResolver)
 
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -286,7 +289,8 @@ fun ChatMessageItem(
 @Composable
 private fun RichMessageContent(
     content: String,
-    imageResolver: ((String) -> File?)? = null
+    imageResolver: ((String) -> File?)? = null,
+    videoResolver: ((String) -> File?)? = null
 ) {
     val context = LocalContext.current
     val parts = content.split("```")
@@ -305,7 +309,7 @@ private fun RichMessageContent(
                         code.contains("<canvas", ignoreCase = true)
 
                 if (isHtml) {
-                    InteractiveHtmlBlock(code = code, lang = lang, imageResolver = imageResolver)
+                    InteractiveHtmlBlock(code = code, lang = lang, imageResolver = imageResolver, videoResolver = videoResolver)
                 } else {
                     Surface(
                         modifier = Modifier
@@ -383,10 +387,17 @@ private fun RichMessageContent(
                 // Regular prose text
                 if (part.isNotBlank()) {
                     val resolver = imageResolver
+                    val videoResolverForPart = videoResolver
                     val references = resolver?.let { GeneratedImageReferences.referencesIn(part) }.orEmpty()
-                    // A markdown picture reference is shown as the picture
-                    // itself, so the raw token is dropped from the text.
-                    val prose = part.replace(MARKDOWN_IMAGE, "").trim()
+                    val videoReferences = videoResolverForPart
+                        ?.let { GeneratedVideoReferences.referencesIn(part) }
+                        .orEmpty()
+                    // A markdown reference is shown as the media itself, so the
+                    // raw token is dropped from the text.
+                    val prose = part
+                        .replace(MARKDOWN_IMAGE, "")
+                        .replace(MARKDOWN_VIDEO, "")
+                        .trim()
 
                     if (prose.isNotEmpty()) {
                         Text(
@@ -403,6 +414,12 @@ private fun RichMessageContent(
                     if (resolver != null && references.isNotEmpty()) {
                         GeneratedImagesRow(references = references, resolver = resolver)
                     }
+                    if (videoResolverForPart != null && videoReferences.isNotEmpty()) {
+                        GeneratedVideosRow(
+                            references = videoReferences,
+                            resolver = videoResolverForPart
+                        )
+                    }
                 }
             }
         }
@@ -411,6 +428,13 @@ private fun RichMessageContent(
 
 /** A markdown image whose target is a generated picture. */
 private val MARKDOWN_IMAGE = Regex("!\\[[^\\]]*\\]\\(\\s*gen:[A-Za-z0-9_-]{1,64}\\s*\\)")
+
+/**
+ * A markdown link (or image) whose target is a generated clip. The model is
+ * asked for a link, but a small model sometimes writes image syntax, so both
+ * forms are recognised and removed from the prose.
+ */
+private val MARKDOWN_VIDEO = Regex("!?\\[[^\\]]*\\]\\(\\s*vid:[A-Za-z0-9_-]{1,64}\\s*\\)")
 
 /**
  * Shows the pictures a reply referenced.
@@ -447,27 +471,53 @@ private fun GeneratedImagesRow(
 }
 
 @Composable
+private fun GeneratedVideosRow(
+    references: List<String>,
+    resolver: (String) -> File?
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        references.forEach { id ->
+            val file = resolver(id) ?: return@forEach
+            GeneratedVideoPlayer(file = file, id = id)
+        }
+    }
+}
+
+@Composable
 private fun InteractiveHtmlBlock(
     code: String,
     lang: String,
-    imageResolver: ((String) -> File?)? = null
+    imageResolver: ((String) -> File?)? = null,
+    videoResolver: ((String) -> File?)? = null
 ) {
     val context = LocalContext.current
     var isLivePreview by remember { mutableStateOf(true) }
     var isFullscreenOpen by remember { mutableStateOf(false) }
 
-    // The sandbox may point at generated pictures with gen:<id>. The WebView
-    // cannot read the app's files, so they are inlined as data: URIs.
-    val resolvedCode = remember(code, imageResolver) {
-        if (imageResolver == null) {
-            code
-        } else {
-            GeneratedImageReferences.inline(code) { id ->
+    // The sandbox may point at generated media with gen:<id> or vid:<id>. The
+    // WebView cannot read the app's files, so they are inlined as data: URIs.
+    val resolvedCode = remember(code, imageResolver, videoResolver) {
+        var resolved = code
+        if (imageResolver != null) {
+            resolved = GeneratedImageReferences.inline(resolved) { id ->
                 imageResolver(id)?.let { file ->
                     runCatching { "data:image/png;base64," + Base64Codec.encode(file.readBytes()) }.getOrNull()
                 }
             }
         }
+        if (videoResolver != null) {
+            resolved = GeneratedVideoReferences.inline(resolved) { id ->
+                videoResolver(id)?.let { file ->
+                    runCatching { "data:video/mp4;base64," + Base64Codec.encode(file.readBytes()) }.getOrNull()
+                }
+            }
+        }
+        resolved
     }
 
     Surface(

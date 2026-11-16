@@ -51,6 +51,11 @@ class MCPToolExecutor(
             name = "generate_image",
             description = "Draws a picture on the device from a written description. The picture is saved with the chat and gets a reference token. Use the token to show it: in your reply as ![description](gen:ID) or in the HTML sandbox as <img src=\"gen:ID\">.",
             parametersDescription = "JSON object with \"prompt\" (string, what to draw), and optionally \"width\", \"height\" (pixels, default 512), \"steps\" (sampling steps) and \"seed\" (integer). Example: {\"prompt\": \"a red fox in a snowy forest\"}"
+        ),
+        MCPTool(
+            name = "generate_video",
+            description = "Renders a short video with a synchronized soundtrack on the device from a written description. The clip is saved with the chat and gets a reference token. Use the token to show it: in your reply as [description](vid:ID) or in the HTML sandbox as <video src=\"vid:ID\" controls></video>.",
+            parametersDescription = "JSON object with \"prompt\" (string, what happens in the clip), and optionally \"width\", \"height\" (pixels, default 384), \"seconds\" (length, 1 to 3, default 2), \"fps\" (4 to 24, default 16), \"steps\" (sampling steps) and \"seed\" (integer). Example: {\"prompt\": \"a red fox running through a snowy forest, the wind whistling\"}"
         )
     )
 
@@ -95,6 +100,16 @@ class MCPToolExecutor(
                         toolName = toolName,
                         argument = argument,
                         result = "Image generation is not available right now.",
+                        success = false
+                    )
+                }
+                "generate_video" -> {
+                    // Like generate_image, the orchestrator has to release the
+                    // chat weights before the clip is rendered.
+                    ToolCallResponse(
+                        toolName = toolName,
+                        argument = argument,
+                        result = "Video generation is not available right now.",
                         success = false
                     )
                 }
