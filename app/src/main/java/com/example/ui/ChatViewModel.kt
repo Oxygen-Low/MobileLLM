@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.audio.SpeechPlayer
 import com.example.audio.SpeechRecorder
 import com.example.changelog.ChangelogManager
@@ -11,6 +12,7 @@ import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
 import com.example.data.ChatSessionEntity
 import com.example.data.ChatTranscript
+import com.example.data.LegacyInstallPreferences
 import com.example.data.ModelPreferences
 import com.example.image.GeneratedImage
 import com.example.image.GeneratedImageStore
@@ -39,6 +41,8 @@ import com.example.model.VideoModelProfile
 import com.example.tools.HtmlSandboxManager
 import com.example.tools.MCPToolExecutor
 import com.example.tools.ToolCallResponse
+import com.example.update.LegacyInstall
+import com.example.update.LegacyInstallManager
 import com.example.update.UpdateManager
 import com.example.video.GeneratedVideoStore
 import com.example.video.VideoPromptParser
@@ -69,6 +73,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val modelEngineManager = ModelEngineManager(mcpToolExecutor)
     val downloadManager = ModelDownloadManager(application)
     val updateManager = UpdateManager(application)
+    private val legacyInstallManager = LegacyInstallManager(application)
 
     /**
      * Offers the changelog of the versions the user skipped when the app was
@@ -176,6 +181,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val changelogState = changelogManager.state
 
     private val modelPreferences = ModelPreferences(application)
+    private val legacyInstallPreferences = LegacyInstallPreferences(application)
 
     val availableModels = MutableStateFlow(ModelProfile.DEFAULT_MODELS)
 
@@ -547,6 +553,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // The app may have been updated since the last time it was used, so
         // offer the changelog of the versions the user skipped.
         changelogManager.onAppStart()
+        removePreviousInstall()
         viewModelScope.launch {
             if (selectedModel.value.isReadyToLoad && modelEngineManager.loadState.value != ModelLoadState.LOADED) {
                 val file = downloadManager.getModelFile(selectedModel.value.id)
@@ -570,6 +577,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             modelEngineManager.unloadModel()
+        }
+    }
+
+    /**
+     * Offers to remove the install that is left from the old package id.
+     *
+     * V28 changed the application id, so Android added the new app next to the
+     * old one instead of updating it. The old package still holds every model
+     * it downloaded, and only the package manager can remove it (an app may
+     * not uninstall another silently). The screen is opened once per version,
+     * so declining it does not block the app on every launch.
+     */
+    private fun removePreviousInstall() {
+        val installed = legacyInstallManager.isPreviousVersionInstalled()
+        val askedVersion = legacyInstallPreferences.askedVersionCode
+        if (!LegacyInstall.shouldRemove(installed, askedVersion, BuildConfig.VERSION_CODE)) return
+
+        if (legacyInstallManager.requestUninstall()) {
+            legacyInstallPreferences.askedVersionCode = BuildConfig.VERSION_CODE
         }
     }
 

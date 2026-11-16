@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Package visibility is restricted on Android 11+. The app was published
+         under this id before V28, and the old install has to be detected so
+         its files can be removed. -->
+    <queries>
+        <package android:name="com.aistudio.pocketlm.krfxwq" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
