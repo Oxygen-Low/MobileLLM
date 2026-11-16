@@ -18,13 +18,13 @@ class VideoPromptParserTest {
         )
 
         assertEquals("a fox running through snow", request.prompt)
-        assertEquals(640, request.width)
+        assertEquals(VideoPromptParser.MAX_SIZE, request.width)
         assertEquals(480, request.height)
-        assertEquals(24, request.frameCount)
+        // The motion module was trained on a sixteen-frame context.
+        assertEquals(VideoPromptParser.MAX_FRAMES, request.frameCount)
         assertEquals(12, request.fps)
         assertEquals(10, request.steps)
         assertEquals(42, request.seed)
-        assertEquals(2f, request.durationSeconds, 0.001f)
     }
 
     @Test
@@ -40,7 +40,7 @@ class VideoPromptParserTest {
         assertEquals("a red fox", request.prompt)
         assertEquals(384, request.width)
         assertEquals(384, request.height)
-        assertEquals(32, request.frameCount)
+        assertEquals(VideoPromptParser.MAX_FRAMES, request.frameCount)
         assertEquals(16, request.fps)
         assertEquals(20, request.steps)
         assertNull(request.seed)
@@ -69,7 +69,7 @@ class VideoPromptParserTest {
         )
         assertEquals(VideoPromptParser.MAX_SIZE, tooBig.width)
         assertEquals(VideoPromptParser.MIN_SIZE, tooBig.height)
-        assertEquals(VideoPromptParser.MAX_SECONDS, tooBig.durationSeconds.toInt())
+        assertEquals(VideoPromptParser.MAX_FRAMES, tooBig.frameCount)
         assertEquals(VideoPromptParser.MAX_FPS, tooBig.fps)
     }
 

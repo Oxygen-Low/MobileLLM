@@ -45,23 +45,23 @@ class VideoModelProfileTest {
     }
 
     @Test
-    fun `the weights live in the same folder as the chat models`() {
+    fun `the weights and motion module live with the other models`() {
         val root = tempFolder.newFolder("models")
-        assertEquals(
-            File(root, "${VideoModelProfile.LTX_2_5_DISTILLED.id}.gguf"),
-            VideoModelProfile.LTX_2_5_DISTILLED.fileIn(root)
-        )
+        val model = VideoModelProfile.DEFAULT_VIDEO_MODEL
+        assertEquals(File(root, "${model.id}.gguf"), model.fileIn(root))
+        assertEquals(File(root, "${model.id}.motion.safetensors"), model.motionFileIn(root))
     }
 
     @Test
-    fun `a missing or tiny file is not ready`() {
+    fun `a model is ready only when both the checkpoint and the motion module are present`() {
         val root = tempFolder.newFolder("models")
-        assertFalse(VideoModelProfile.LTX_2_5_DISTILLED.isReady(root))
+        val model = VideoModelProfile.DEFAULT_VIDEO_MODEL
+        assertFalse(model.isReady(root))
 
-        VideoModelProfile.LTX_2_5_DISTILLED.fileIn(root).writeBytes(ByteArray(64))
-        assertFalse(VideoModelProfile.LTX_2_5_DISTILLED.isReady(root))
+        model.fileIn(root).writeBytes(ByteArray(2 * 1024 * 1024))
+        assertFalse(model.isReady(root))
 
-        VideoModelProfile.LTX_2_5_DISTILLED.fileIn(root).writeBytes(ByteArray(2 * 1024 * 1024))
-        assertTrue(VideoModelProfile.LTX_2_5_DISTILLED.isReady(root))
+        model.motionFileIn(root).writeBytes(ByteArray(1024 * 1024))
+        assertTrue(model.isReady(root))
     }
 }

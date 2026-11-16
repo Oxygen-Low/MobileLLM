@@ -52,14 +52,35 @@ set(GGML_WEBGPU                OFF CACHE BOOL "" FORCE)
 set(GGML_ET                    OFF CACHE BOOL "" FORCE)
 set(GGML_ACCELERATE            OFF CACHE BOOL "" FORCE)
 
+# SD checkpoints use tensor names longer than ggml's default 64 characters.
+# This has to be set before llama.cpp brings ggml in, so both backends agree on
+# the same tensor name layout.
+add_compile_definitions(GGML_MAX_NAME=160)
+
 add_subdirectory(llama.cpp)
+
+# ---------------------------------------------------------------------------
+# stable-diffusion.cpp build configuration
+#
+# The image engine samples the downloaded SD checkpoints with this library.
+# It reuses the ggml that llama.cpp already builds: the upstream-compatible
+# mode drops the patched INT8/FP8 operators, which the SD models here do not
+# need, and avoids compiling a second ggml into the same shared library.
+# ---------------------------------------------------------------------------
+set(SD_BUILD_EXAMPLES         OFF CACHE BOOL "" FORCE)
+set(SD_WEBP                   OFF CACHE BOOL "" FORCE)
+set(SD_WEBM                   OFF CACHE BOOL "" FORCE)
+set(SD_USE_UPSTREAM_GGML      ON  CACHE BOOL "" FORCE)
+set(SD_GGML_SOURCE_DIR        "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/ggml" CACHE PATH "" FORCE)
+
+add_subdirectory(stable-diffusion.cpp)
 
 # ---------------------------------------------------------------------------
 # JNI bridge
 # ---------------------------------------------------------------------------
 add_library(mobilellm SHARED llama_jni.cpp image_jni.cpp video_jni.cpp)
 
-target_link_libraries(mobilellm PRIVATE llama ggml)
+target_link_libraries(mobilellm PRIVATE llama ggml stable-diffusion)
 
 target_compile_options(mobilellm PRIVATE -O3 -ffunction-sections -fdata-sections)
 

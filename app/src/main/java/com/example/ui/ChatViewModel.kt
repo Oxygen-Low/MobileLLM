@@ -123,7 +123,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * again before the encoder runs, so an 8 GB checkpoint never competes with
      * the chat model for memory.
      */
-    val videoEngineManager = VideoEngineManager(application, downloadManager, generatedVideoStore)
+    val videoEngineManager = VideoEngineManager(application, downloadManager, generatedVideoStore, speechEngineManager)
 
     /** The video models the user can pick from. */
     val videoModels: List<VideoModelProfile> = VideoModelProfile.MODELS

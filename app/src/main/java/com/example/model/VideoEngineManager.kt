@@ -6,6 +6,7 @@ import com.example.data.VideoPreferences
 import com.example.video.GeneratedVideo
 import com.example.video.GeneratedVideoStore
 import com.example.video.Mp4Writer
+import com.example.video.Pcm16Converter
 import com.example.video.VideoGenerationRequest
 import com.example.model.internal.VideoBridge
 import kotlinx.coroutines.CancellationException
@@ -53,7 +54,8 @@ enum class VideoEngineState {
 class VideoEngineManager(
     context: Context,
     private val downloads: ModelDownloadManager,
-    private val store: GeneratedVideoStore
+    private val store: GeneratedVideoStore,
+    private val speech: SpeechEngineManager
 ) {
     private val preferences = VideoPreferences(context.applicationContext)
 
@@ -204,12 +206,8 @@ class VideoEngineManager(
 
         _isGenerating.value = true
         return try {
-            // The palette belongs to the description, not to a coin flip. This
-            // keeps every frame in the prompt's colours and makes a repeated
-            // prompt draw the same clip instead of a new random pattern.
-            val palette = PromptPalette.from(request.prompt)
-            val seed = request.seed ?: PromptPalette.seedFor(request.prompt)
             val model = _selected.value
+            val seed = request.seed ?: request.prompt.hashCode()
             val frames = withContext(Dispatchers.IO) {
                 VideoBridge.nativeGenerateVideo(
                     active,
@@ -218,10 +216,7 @@ class VideoEngineManager(
                     request.height,
                     request.frameCount,
                     request.steps,
-                    seed,
-                    palette.hueA,
-                    palette.hueB,
-                    palette.saturation
+                    seed
                 )
             }
             val expectedFrames = request.frameCount.toLong() * request.width * request.height * 4
@@ -230,23 +225,21 @@ class VideoEngineManager(
                 return null
             }
 
+            // The diffusion weights are done with. Release them before the TTS
+            // model loads for the narration, so the two never compete for RAM.
+            unloadInternal()
+
             val pcm = if (model.hasAudio) {
-                withContext(Dispatchers.IO) {
-                    VideoBridge.nativeGenerateAudio(
-                        active,
-                        request.prompt,
-                        request.frameCount,
-                        request.fps,
-                        Mp4Writer.SAMPLE_RATE,
-                        seed
-                    )
-                }
+                narrate(request.prompt, request.frameCount, request.fps)
             } else {
                 null
             }
-            if (model.hasAudio && (pcm == null || pcm.size < 2)) {
-                _error.value = "The video engine could not synthesize the soundtrack"
-                return null
+            // A voice is a separate, small download. If none is available the
+            // clip is still useful: ship it silent rather than losing the
+            // frames the diffusion model already produced.
+            val hasNarration = pcm != null && pcm.size >= 2
+            if (model.hasAudio && !hasNarration) {
+                Log.w(TAG, "No TTS voice available; saving the clip without narration")
             }
 
             val pending = store.newFile(sessionId)
@@ -273,7 +266,7 @@ class VideoEngineManager(
                     width = request.width,
                     height = request.height,
                     durationMs = request.frameCount * 1000L / request.fps,
-                    hasAudio = model.hasAudio
+                    hasAudio = hasNarration
                 )
             }
         } catch (c: CancellationException) {
@@ -292,6 +285,28 @@ class VideoEngineManager(
         }
     }
 
+    /**
+     * Reads the prompt aloud with the on-device TTS voice and fits the result
+     * to the length of the clip. The voice is a small model that loads only
+     * after the diffusion weights have been released.
+     */
+    private suspend fun narrate(prompt: String, frameCount: Int, fps: Int): ByteArray? {
+        val selected = speech.ttsVoice.value
+        val voice = if (selected.isReady(downloads.speechDir)) {
+            selected
+        } else {
+            SpeechModelProfile.DEFAULT_TTS_VOICE
+        }
+        val spoken = speech.previewVoice(voice, "A short clip of $prompt") ?: return null
+        val targetSamples = Mp4Writer.SAMPLE_RATE * frameCount / fps
+        return Pcm16Converter.convert(
+            spoken.samples,
+            spoken.sampleRate,
+            Mp4Writer.SAMPLE_RATE,
+            targetSamples
+        )
+    }
+
     /** Downloads the weights of [model] when they are missing. */
     private suspend fun downloadWeights(model: VideoModelProfile) {
         if (model.isReady(downloads.modelsDir)) {
@@ -306,12 +321,13 @@ class VideoEngineManager(
             }
             downloads.startDownload(
                 modelId = model.id,
-                repo = model.modelScopeRepo,
-                filename = model.modelScopeFile,
+                repo = null,
+                filename = null,
                 totalMb = model.downloadSizeMb,
                 hfRepo = model.hfRepo,
                 hfFilename = model.hfFile
             ) { }
+            downloadMotionModule(model)
             refreshDownloaded()
 
             // startDownload reports a failed transfer through the shared
@@ -329,6 +345,19 @@ class VideoEngineManager(
         }
     }
 
+    /** Downloads the AnimateDiff motion module that drives the checkpoint. */
+    private suspend fun downloadMotionModule(model: VideoModelProfile) {
+        val file = model.motionFileIn(downloads.modelsDir)
+        if (file.isFile && file.length() >= 512L * 1024L) return
+        downloads.downloadCompanionFile(
+            stateKey = "${model.id}_motion",
+            target = file,
+            url = "https://huggingface.co/${model.motionRepo}/resolve/main/${model.motionFile}",
+            totalMb = model.motionSizeMb,
+            minBytes = 512L * 1024L
+        )
+    }
+
     /** Maps the selected weights into memory. The caller holds no lock. */
     private suspend fun load(): Boolean = loadMutex.withLock {
         if (handle != 0L) {
@@ -344,10 +373,11 @@ class VideoEngineManager(
 
         _state.value = VideoEngineState.LOADING
         val file = downloads.getModelFile(model.id)
+        val motion = model.motionFileIn(downloads.modelsDir)
         try {
             val threads = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
             val newHandle = withContext(Dispatchers.IO) {
-                VideoBridge.nativeLoadVideoModel(file.absolutePath, threads)
+                VideoBridge.nativeLoadVideoModel(file.absolutePath, motion.absolutePath, threads)
             }
             if (newHandle == 0L) {
                 _state.value = VideoEngineState.ERROR

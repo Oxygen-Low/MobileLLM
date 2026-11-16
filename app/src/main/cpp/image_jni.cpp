@@ -1,26 +1,17 @@
 // JNI bridge for the on-device image engine.
 //
-// The engine shares the app's native library with the llama.cpp text engine.
-// A picture is sampled from the prompt and the model weights and returned as
-// raw RGBA; the PNG encoding happens on the Kotlin side, so this file does not
-// depend on an image library.
-//
-// The sampler is a small field renderer: it folds the model file and the
-// prompt into a seed and paints a deterministic picture from it. The colour
-// anchors arrive from Kotlin, derived from the prompt's own words, so the
-// picture is painted in the colours that were asked for instead of a random
-// palette taken from the seed. It is the built in engine the app ships with,
-// and it deliberately keeps the same surface a diffusion backend would expose,
-// so the weights can be swapped for a real sampler without touching the Kotlin
-// callers.
+// A downloaded SD checkpoint is loaded into stable-diffusion.cpp and sampled
+// with the prompt. The sampler returns interleaved RGB bytes; this file turns
+// them into the raw RGBA the Kotlin PNG writer expects. The native library is
+// shared with the text and video engines.
 
 #include <jni.h>
 #include <android/log.h>
 
+#include "stable-diffusion.h"
+
 #include <atomic>
-#include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -31,128 +22,31 @@ constexpr const char *TAG = "ImageBridge";
 
 struct ImageEngine {
     std::string path;
-    uint64_t seed = 0;
+    sd_ctx_t *ctx = nullptr;
     std::atomic<bool> cancelled{false};
 };
 
-uint64_t hash_bytes(const void *data, size_t length, uint64_t seed) {
-    const auto *bytes = static_cast<const unsigned char *>(data);
-    uint64_t h = 1469598103934665603ull ^ seed;
-    for (size_t i = 0; i < length; ++i) {
-        h ^= bytes[i];
-        h *= 1099511628211ull;
-    }
-    return h;
-}
-
-uint32_t mix(uint32_t value) {
-    value ^= value >> 16;
-    value *= 0x7feb352dU;
-    value ^= value >> 15;
-    value *= 0x846ca68bU;
-    value ^= value >> 16;
-    return value;
-}
-
-float lattice(int x, int y, uint32_t salt) {
-    uint32_t h = mix(static_cast<uint32_t>(x) * 0x1f123bb5U +
-                     static_cast<uint32_t>(y) * 0x2545f491U + salt);
-    return static_cast<float>(h & 0xFFFFu) / 65535.0f;
-}
-
-// Smooth value noise with a bilinear interpolation between lattice points.
-float value_noise(float x, float y, uint32_t salt) {
-    const int xi = static_cast<int>(std::floor(x));
-    const int yi = static_cast<int>(std::floor(y));
-    const float xf = x - static_cast<float>(xi);
-    const float yf = y - static_cast<float>(yi);
-
-    const float v00 = lattice(xi, yi, salt);
-    const float v10 = lattice(xi + 1, yi, salt);
-    const float v01 = lattice(xi, yi + 1, salt);
-    const float v11 = lattice(xi + 1, yi + 1, salt);
-
-    const float sx = xf * xf * (3.0f - 2.0f * xf);
-    const float sy = yf * yf * (3.0f - 2.0f * yf);
-    const float top = v00 + (v10 - v00) * sx;
-    const float bottom = v01 + (v11 - v01) * sx;
-    return top + (bottom - top) * sy;
-}
-
-float fbm(float x, float y, uint32_t salt, int octaves) {
-    float sum = 0.0f;
-    float amplitude = 0.5f;
-    float frequency = 1.0f;
-    float normalizer = 0.0f;
-    for (int i = 0; i < octaves; ++i) {
-        sum += value_noise(x * frequency, y * frequency, salt + static_cast<uint32_t>(i) * 0x9E3779B9u) * amplitude;
-        normalizer += amplitude;
-        amplitude *= 0.5f;
-        frequency *= 2.0f;
-    }
-    return normalizer > 0.0f ? sum / normalizer : 0.0f;
-}
-
-void hsv_to_rgb(float h, float s, float v, float &r, float &g, float &b) {
-    h = h - std::floor(h);
-    const float i = std::floor(h * 6.0f);
-    const float f = h * 6.0f - i;
-    const float p = v * (1.0f - s);
-    const float q = v * (1.0f - f * s);
-    const float t = v * (1.0f - (1.0f - f) * s);
-    switch (static_cast<int>(i) % 6) {
-        case 0: r = v; g = t; b = p; break;
-        case 1: r = q; g = v; b = p; break;
-        case 2: r = p; g = v; b = t; break;
-        case 3: r = p; g = q; b = v; break;
-        case 4: r = t; g = p; b = v; break;
-        default: r = v; g = p; b = q; break;
-    }
-}
-
-// Paints one deterministic picture. The palette comes from the prompt, while
-// the seed only decides the layout of the noise field. Returns false when the
-// pass was cancelled.
-bool render(const ImageEngine &engine, const std::string &prompt, int width, int height,
-            int steps, uint32_t seed, float hue_a, float hue_b, float saturation,
-            std::vector<unsigned char> &pixels) {
-    const uint32_t salt = static_cast<uint32_t>(engine.seed ^ hash_bytes(prompt.data(), prompt.size(), seed));
-    const uint32_t salt_b = mix(salt);
-
-    const int octaves = steps <= 4 ? 4 : (steps <= 12 ? 5 : 6);
-    const float scale = 3.0f + static_cast<float>(steps) * 0.15f;
-
-    const float inv_width = 1.0f / static_cast<float>(width);
-    const float inv_height = 1.0f / static_cast<float>(height);
-
-    for (int y = 0; y < height; ++y) {
-        if (engine.cancelled.load()) return false;
-        for (int x = 0; x < width; ++x) {
-            const float u = static_cast<float>(x) * inv_width;
-            const float v = static_cast<float>(y) * inv_height;
-
-            const float field = fbm(u * scale, v * scale, salt, octaves);
-            const float detail = fbm(u * scale * 3.0f + 11.0f, v * scale * 3.0f - 7.0f, salt_b, octaves);
-
-            const float blend = field * 0.7f + detail * 0.3f;
-            const float hue = hue_a + (hue_b - hue_a) * blend;
-            const float value = 0.35f + 0.65f * (0.5f * field + 0.5f * detail);
-
-            float r = 0.0f, g = 0.0f, b = 0.0f;
-            hsv_to_rgb(hue, saturation, value, r, g, b);
-
-            const size_t index = (static_cast<size_t>(y) * width + x) * 4;
-            pixels[index + 0] = static_cast<unsigned char>(r * 255.0f + 0.5f);
-            pixels[index + 1] = static_cast<unsigned char>(g * 255.0f + 0.5f);
-            pixels[index + 2] = static_cast<unsigned char>(b * 255.0f + 0.5f);
-            pixels[index + 3] = 255;
-        }
-    }
-    return true;
-}
-
 ImageEngine *as_engine(jlong handle) {
     return reinterpret_cast<ImageEngine *>(handle);
+}
+
+bool set_string(sd_opt_t *opt, const char *key, const char *value) {
+    return value != nullptr && sd_opt_set_string(opt, key, value) == SD_STATUS_OK;
+}
+
+void log_sd_error(const char *what) {
+    const char *message = sd_get_last_error();
+    __android_log_print(ANDROID_LOG_ERROR, TAG, "%s: %s", what,
+                        message != nullptr ? message : "no details");
+}
+
+std::string read_jstring(JNIEnv *env, jstring value) {
+    if (value == nullptr) return std::string();
+    const char *raw = env->GetStringUTFChars(value, nullptr);
+    if (raw == nullptr) return std::string();
+    std::string text(raw);
+    env->ReleaseStringUTFChars(value, raw);
+    return text;
 }
 
 } // namespace
@@ -162,104 +56,150 @@ extern "C" {
 JNIEXPORT jlong JNICALL
 Java_com_example_model_internal_ImageBridge_nativeLoadImageModel(
     JNIEnv *env, jobject, jstring path, jint nThreads) {
-    if (path == nullptr) return 0;
+    const std::string model_path = read_jstring(env, path);
+    if (model_path.empty()) return 0;
 
-    const char *raw = env->GetStringUTFChars(path, nullptr);
-    if (raw == nullptr) return 0;
-    std::string model_path(raw);
-    env->ReleaseStringUTFChars(path, raw);
+    sd_ctx_opt_t *options = sd_ctx_opt_create();
+    if (options == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Could not allocate image sampler options");
+        return 0;
+    }
+
+    bool ok = set_string(options, "model_path", model_path.c_str()) &&
+              sd_opt_set_int(options, "n_threads", nThreads) == SD_STATUS_OK;
+
+    sd_ctx_t *ctx = nullptr;
+    if (ok) {
+        const sd_status_t status = sd_ctx_create(options, &ctx);
+        if (status != SD_STATUS_OK || ctx == nullptr) {
+            log_sd_error("Could not load the image model");
+            ok = false;
+        }
+    }
+    sd_opt_free(options);
+    if (!ok) {
+        if (ctx != nullptr) sd_ctx_free(ctx);
+        return 0;
+    }
 
     try {
-        FILE *file = std::fopen(model_path.c_str(), "rb");
-        if (file == nullptr) {
-            __android_log_print(ANDROID_LOG_WARN, TAG, "Cannot open image model: %s", model_path.c_str());
-            return 0;
-        }
-
-        std::fseek(file, 0, SEEK_END);
-        const long size = std::ftell(file);
-        std::fseek(file, 0, SEEK_SET);
-        if (size < 1024L * 1024L) {
-            __android_log_print(ANDROID_LOG_WARN, TAG, "Image model is too small: %ld bytes", size);
-            std::fclose(file);
-            return 0;
-        }
-
-        std::vector<unsigned char> header(64 * 1024);
-        const size_t read = std::fread(header.data(), 1, header.size(), file);
-        std::fclose(file);
-
         ImageEngine *engine = new ImageEngine();
         engine->path = model_path;
-        engine->seed = hash_bytes(header.data(), read, static_cast<uint64_t>(size));
-        (void) nThreads;
-
-        __android_log_print(ANDROID_LOG_INFO, TAG, "Image model ready: %s (%ld MB)",
-                            model_path.c_str(), size / (1024 * 1024));
+        engine->ctx = ctx;
+        __android_log_print(ANDROID_LOG_INFO, TAG, "Image model ready: %s", model_path.c_str());
         return reinterpret_cast<jlong>(engine);
     } catch (...) {
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "Could not allocate the image engine");
+        sd_ctx_free(ctx);
         return 0;
     }
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_model_internal_ImageBridge_nativeFreeImageModel(JNIEnv *, jobject, jlong handle) {
-    delete as_engine(handle);
+    ImageEngine *engine = as_engine(handle);
+    if (engine != nullptr) {
+        if (engine->ctx != nullptr) sd_ctx_free(engine->ctx);
+        delete engine;
+    }
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_model_internal_ImageBridge_nativeCancelImageGeneration(
     JNIEnv *, jobject, jlong handle) {
     ImageEngine *engine = as_engine(handle);
-    if (engine != nullptr) {
+    if (engine != nullptr && engine->ctx != nullptr) {
         engine->cancelled.store(true);
+        sd_cancel_generation(engine->ctx, SD_CANCEL_ALL);
     }
 }
 
 JNIEXPORT jbyteArray JNICALL
 Java_com_example_model_internal_ImageBridge_nativeGenerateImage(
     JNIEnv *env, jobject, jlong handle, jstring prompt, jint width, jint height,
-    jint steps, jint seed, jfloat hue_a, jfloat hue_b, jfloat saturation) {
+    jint steps, jint seed, jfloat, jfloat, jfloat) {
     ImageEngine *engine = as_engine(handle);
-    if (engine == nullptr) return nullptr;
-
+    if (engine == nullptr || engine->ctx == nullptr) return nullptr;
     if (width <= 0 || height <= 0) return nullptr;
-    if (width > 4096) width = 4096;
-    if (height > 4096) height = 4096;
+
+    // Latent diffusion needs dimensions divisible by eight. The Kotlin parser
+    // aligns them, but keep the guard here since this is a public JNI surface.
+    width = (width + 7) & ~7;
+    height = (height + 7) & ~7;
     if (steps <= 0) steps = 1;
     if (steps > 50) steps = 50;
 
-    std::string text;
-    if (prompt != nullptr) {
-        const char *raw = env->GetStringUTFChars(prompt, nullptr);
-        if (raw != nullptr) {
-            text.assign(raw);
-            env->ReleaseStringUTFChars(prompt, raw);
-        }
+    const std::string text = read_jstring(env, prompt);
+    if (text.empty()) return nullptr;
+
+    engine->cancelled.store(false);
+
+    sd_img_gen_opt_t *options = sd_img_gen_opt_create();
+    if (options == nullptr) return nullptr;
+
+    bool ok = set_string(options, "prompt", text.c_str()) &&
+              set_string(options, "negative_prompt", "blurry, low quality, watermark, text, deformed") &&
+              sd_opt_set_int(options, "width", width) == SD_STATUS_OK &&
+              sd_opt_set_int(options, "height", height) == SD_STATUS_OK &&
+              sd_opt_set_int(options, "seed", static_cast<int64_t>(seed)) == SD_STATUS_OK &&
+              sd_opt_set_int(options, "sample.steps", steps) == SD_STATUS_OK &&
+              set_string(options, "sample.method", "euler");
+
+    // SD-Turbo is distilled: guidance has to stay low or the picture washes
+    // out. The base 1.5 checkpoint wants ordinary classifier-free guidance.
+    const bool distilled = engine->path.find("turbo") != std::string::npos;
+    if (ok) {
+        ok = sd_opt_set_float(options, "guidance.txt_cfg", distilled ? 1.0 : 7.0) == SD_STATUS_OK &&
+             set_string(options, "sample.scheduler", distilled ? "simple" : "normal");
     }
 
-    try {
-        engine->cancelled.store(false);
-        const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
-        std::vector<unsigned char> pixels(count, 0);
-
-        const uint32_t paint_seed = static_cast<uint32_t>(seed) ^
-                                    static_cast<uint32_t>(engine->seed >> 32);
-        if (!render(*engine, text, width, height, steps, paint_seed,
-                    hue_a, hue_b, saturation, pixels)) {
-            return nullptr;
+    sd_result_t *result = nullptr;
+    if (ok) {
+        const sd_status_t status = sd_generate_image(engine->ctx, options, &result);
+        if (status != SD_STATUS_OK || result == nullptr ||
+            sd_result_get_image_count(result) == 0) {
+            if (status != SD_STATUS_CANCELLED) log_sd_error("Image sampling failed");
+            ok = false;
         }
-
-        jbyteArray result = env->NewByteArray(static_cast<jsize>(count));
-        if (result == nullptr) return nullptr;
-        env->SetByteArrayRegion(result, 0, static_cast<jsize>(count),
-                                reinterpret_cast<const jbyte *>(pixels.data()));
-        return result;
-    } catch (...) {
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "Image sampling failed");
+    }
+    sd_opt_free(options);
+    if (!ok) {
+        if (result != nullptr) sd_result_free(result);
         return nullptr;
     }
+
+    const sd_tensor_t *image = sd_result_get_image(result, 0);
+    const int channels = static_cast<int>(sd_tensor_dim(image, 0));
+    const int image_width = static_cast<int>(sd_tensor_dim(image, 1));
+    const int image_height = static_cast<int>(sd_tensor_dim(image, 2));
+    const auto *pixels = static_cast<const uint8_t *>(sd_tensor_data(image));
+
+    jbyteArray output = nullptr;
+    if (channels >= 3 && pixels != nullptr && image_width == width && image_height == height) {
+        const size_t count = static_cast<size_t>(image_width) * static_cast<size_t>(image_height);
+        std::vector<uint8_t> rgba(count * 4u);
+        for (size_t i = 0; i < count; ++i) {
+            rgba[i * 4u + 0] = pixels[i * static_cast<size_t>(channels) + 0];
+            rgba[i * 4u + 1] = pixels[i * static_cast<size_t>(channels) + 1];
+            rgba[i * 4u + 2] = pixels[i * static_cast<size_t>(channels) + 2];
+            rgba[i * 4u + 3] = 255;
+        }
+        output = env->NewByteArray(static_cast<jsize>(rgba.size()));
+        if (output != nullptr) {
+            env->SetByteArrayRegion(output, 0, static_cast<jsize>(rgba.size()),
+                                    reinterpret_cast<const jbyte *>(rgba.data()));
+        }
+    } else {
+        __android_log_print(ANDROID_LOG_ERROR, TAG,
+                            "Unexpected image tensor: %dx%d, %d channels",
+                            image_width, image_height, channels);
+    }
+
+    sd_result_free(result);
+    if (engine->cancelled.load()) {
+        if (output != nullptr) env->DeleteLocalRef(output);
+        return nullptr;
+    }
+    return output;
 }
 
 } // extern "C"

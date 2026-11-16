@@ -21,9 +21,8 @@ object ImageBridge {
     /**
      * Samples one picture from [prompt].
      *
-     * The hue and saturation anchors come from the prompt (see PromptPalette)
-     * rather than from the seed, so the picture paints with the colours that
-     * were asked for. The seed only decides the layout of the noise field.
+     * Samples one picture with the loaded SD checkpoint. Width and height
+     * must be multiples of eight, and [seed] decides the initial noise.
      *
      * @return `width * height * 4` bytes of RGBA, or null on error.
      */
@@ -33,10 +32,7 @@ object ImageBridge {
         width: Int,
         height: Int,
         steps: Int,
-        seed: Int,
-        hueA: Float,
-        hueB: Float,
-        saturation: Float
+        seed: Int
     ): ByteArray?
 
     /** Stops a running sampling pass; safe to call from another thread. */

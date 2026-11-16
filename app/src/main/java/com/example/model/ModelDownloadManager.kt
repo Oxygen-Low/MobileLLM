@@ -174,6 +174,61 @@ class ModelDownloadManager(
     }
 
     /**
+     * Downloads a companion file such as an AnimateDiff motion module. These
+     * are safetensors, not GGUF, so the GGUF header check does not apply: a
+     * minimum length is enough to tell a finished download from a truncated
+     * one.
+     */
+    suspend fun downloadCompanionFile(
+        stateKey: String,
+        target: File,
+        url: String,
+        totalMb: Int,
+        minBytes: Long
+    ): Boolean = withContext(Dispatchers.IO) {
+        val expectedBytes = totalMb.toLong() * 1024L * 1024L
+        if (target.isFile && target.length() >= minBytes) {
+            publish(stateKey, 1f, target.length().toFloat(), target.length().toFloat(), 0f,
+                ModelDownloadState.DOWNLOADED)
+            return@withContext true
+        }
+
+        val part = File(modelsDir, "${target.name}.part")
+        try {
+            if (!downloadFrom(url, part, expectedBytes, stateKey, totalMb)) {
+                publish(stateKey, 0f, 0f, expectedBytes.toFloat(), 0f,
+                    ModelDownloadState.ERROR, "Could not download ${target.name}")
+                return@withContext false
+            }
+            if (part.length() < minBytes) {
+                part.delete()
+                publish(stateKey, 0f, 0f, expectedBytes.toFloat(), 0f,
+                    ModelDownloadState.ERROR, "Downloaded ${target.name} is too small")
+                return@withContext false
+            }
+            if (target.exists() && !target.delete()) {
+                throw IOException("Could not replace ${target.name}")
+            }
+            if (!part.renameTo(target)) {
+                throw IOException("Could not move ${target.name} into place")
+            }
+            publish(stateKey, 1f, target.length().toFloat(), target.length().toFloat(), 0f,
+                ModelDownloadState.DOWNLOADED)
+            Log.i(TAG, "Companion file ${target.name} ready")
+            true
+        } catch (e: CancellationException) {
+            publish(stateKey, progressOf(part, expectedBytes), part.length().toFloat(),
+                expectedBytes.toFloat(), 0f, ModelDownloadState.NOT_DOWNLOADED)
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Companion download failed: ${target.name}", e)
+            publish(stateKey, 0f, 0f, expectedBytes.toFloat(), 0f,
+                ModelDownloadState.ERROR, e.message ?: "Network error")
+            false
+        }
+    }
+
+    /**
      * Downloads and unpacks a small speech model. The archive is kept around
      * until extraction succeeds, so a failed unpack can be retried without
      * transferring the weights again.

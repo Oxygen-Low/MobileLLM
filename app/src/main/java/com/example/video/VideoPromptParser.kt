@@ -34,11 +34,17 @@ data class VideoGenerationRequest(
 object VideoPromptParser {
 
     /** The largest edge a request may ask for. */
-    const val MAX_SIZE = 768
+    const val MAX_SIZE = 512
     const val MIN_SIZE = 96
+
+    /** The motion module was trained with a sixteen-frame context. */
+    const val MAX_FRAMES = 16
 
     /** The longest description that is kept; the rest would not change a clip. */
     const val MAX_PROMPT = 1000
+
+    private fun align(size: Int): Int =
+        ((size.coerceIn(MIN_SIZE, MAX_SIZE) + 7) / 8) * 8
 
     /** The clip lengths and frame rates a phone can afford. */
     const val MIN_SECONDS = 1
@@ -61,10 +67,10 @@ object VideoPromptParser {
             prompt = trimmed.trim().removeSurrounding("\"").removeSurrounding("'").trim()
         }
 
-        val width = MiniJson.getInt(trimmed, "width", default = defaultSize)
-            .coerceIn(MIN_SIZE, MAX_SIZE)
-        val height = MiniJson.getInt(trimmed, "height", default = defaultSize)
-            .coerceIn(MIN_SIZE, MAX_SIZE)
+        // Latent diffusion works on a downsampled grid, so keep the edges on
+        // an eight-pixel boundary and inside the motion module's resolution.
+        val width = align(MiniJson.getInt(trimmed, "width", default = defaultSize))
+        val height = align(MiniJson.getInt(trimmed, "height", default = defaultSize))
         val seconds = MiniJson.getInt(trimmed, "seconds", "duration", "length", default = defaultSeconds)
             .coerceIn(MIN_SECONDS, MAX_SECONDS)
         val fps = MiniJson.getInt(trimmed, "fps", "frame_rate", default = defaultFps)
@@ -77,7 +83,7 @@ object VideoPromptParser {
             prompt = prompt.take(MAX_PROMPT),
             width = width,
             height = height,
-            frameCount = seconds * fps,
+            frameCount = (seconds * fps).coerceAtMost(MAX_FRAMES),
             fps = fps,
             steps = steps,
             seed = rawSeed.takeIf { it >= 0 }

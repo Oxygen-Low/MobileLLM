@@ -75,16 +75,14 @@ class ModelsHubSheetTest {
         showHub()
 
         selectTab(ModelHubTab.VIDEO)
-        scrollTo("video_model_${VideoModelProfile.LTX_2_5_DISTILLED.id}")
-        composeTestRule.onNodeWithTag("video_model_${VideoModelProfile.LTX_2_5_DISTILLED.id}")
+        val model = VideoModelProfile.DEFAULT_VIDEO_MODEL
+        scrollTo("video_model_${model.id}")
+        composeTestRule.onNodeWithTag("video_model_${model.id}")
             .assertIsDisplayed()
         composeTestRule.onNodeWithTag(
-            "video_sound_${VideoModelProfile.LTX_2_5_DISTILLED.id}",
+            "video_sound_${model.id}",
             useUnmergedTree = true
         ).assertIsDisplayed()
-        scrollTo("video_model_${VideoModelProfile.LTX_2_5.id}")
-        composeTestRule.onNodeWithTag("video_model_${VideoModelProfile.LTX_2_5.id}")
-            .assertIsDisplayed()
         // Video generation is implemented, so the tab is not a placeholder.
         composeTestRule.onNodeWithTag("hub_work_in_progress").assertDoesNotExist()
     }

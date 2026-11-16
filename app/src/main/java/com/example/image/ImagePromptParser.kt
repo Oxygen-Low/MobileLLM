@@ -33,6 +33,9 @@ object ImagePromptParser {
     /** The longest description that is kept; the rest would not change a picture. */
     const val MAX_PROMPT = 1000
 
+    private fun align(size: Int): Int =
+        ((size.coerceIn(MIN_SIZE, MAX_SIZE) + 7) / 8) * 8
+
     fun parse(argument: String, defaultSize: Int, defaultSteps: Int): ImageGenerationRequest {
         val trimmed = argument.trim()
         var prompt = MiniJson.getString(trimmed, "prompt", "description", "query", "text").trim()
@@ -42,10 +45,11 @@ object ImagePromptParser {
             prompt = trimmed.trim().removeSurrounding("\"").removeSurrounding("'").trim()
         }
 
-        val width = MiniJson.getInt(trimmed, "width", default = defaultSize)
-            .coerceIn(MIN_SIZE, MAX_SIZE)
-        val height = MiniJson.getInt(trimmed, "height", default = defaultSize)
-            .coerceIn(MIN_SIZE, MAX_SIZE)
+        // Latent diffusion works on an 8x-downsampled grid, so the edge has to
+        // be a multiple of eight. Rounding here keeps the PNG writer and the
+        // sampler agreeing on the exact size of the picture.
+        val width = align(MiniJson.getInt(trimmed, "width", default = defaultSize))
+        val height = align(MiniJson.getInt(trimmed, "height", default = defaultSize))
         val steps = MiniJson.getInt(trimmed, "steps", default = defaultSteps)
             .coerceIn(1, 50)
         val rawSeed = MiniJson.getInt(trimmed, "seed", default = -1)

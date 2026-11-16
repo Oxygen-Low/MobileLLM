@@ -196,11 +196,9 @@ class ImageEngineManager(
 
         _isGenerating.value = true
         return try {
-            // A prompt owns its colours and its default seed. Without this the
-            // sampler picked both from chance, so the same description produced
-            // a different, arbitrarily coloured picture on every call.
-            val palette = PromptPalette.from(request.prompt)
-            val seed = request.seed ?: PromptPalette.seedFor(request.prompt)
+            // An absent seed still has to be stable: the same prompt should
+            // draw the same picture until the caller asks for a variation.
+            val seed = request.seed ?: request.prompt.hashCode()
             val pixels = withContext(Dispatchers.IO) {
                 ImageBridge.nativeGenerateImage(
                     active,
@@ -208,10 +206,7 @@ class ImageEngineManager(
                     request.width,
                     request.height,
                     request.steps,
-                    seed,
-                    palette.hueA,
-                    palette.hueB,
-                    palette.saturation
+                    seed
                 )
             }
             if (pixels == null) {
