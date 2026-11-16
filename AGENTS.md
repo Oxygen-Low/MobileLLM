@@ -12,7 +12,8 @@ are llama.cpp builds, the inference engine is native code under
 - `app/src/main/java/com/example/model` - model loading, prompting, streaming
 - `app/src/main/java/com/example/update` - the in app updater
 - `app/src/main/java/com/example/changelog` - the changelog reader
-- `changelogs/` - one markdown file per released version
+- `changelogs/` - the release notes, one markdown file per version that has
+  them (a released version can be missing its file)
 
 ## Changelogs are not optional
 
@@ -45,30 +46,46 @@ Do this even when:
 
 The version of the app is the git tag `V<n>`, where `n` is the
 `versionCode` of the build. Releases are cut from `main` and the workflow
-picks the next number from the existing tags, so the version that is currently
-under development is always the highest tag plus one.
+picks the next number from the tags that are already published, so the version
+that is currently under development is always the latest **released** tag plus
+one.
+
+**Ask the remote, not the working copy.** A local clone can be behind, and the
+files in `changelogs/` are not a record of what was released: a file can exist
+for a release that never finished, and a released version can have no file at
+all. Always read the latest release from GitHub before you pick a number, and
+never take it from the highest file name in `changelogs/`.
 
 ```bash
-# The version that is being worked on right now.
-latest=$(git tag -l 'V[0-9]*' | sed -E 's/^V([0-9]+)$/\1/' \
-  | grep -E '^[0-9]+$' | sort -n | tail -n 1)
-echo $(( ${latest:-0} + 1 ))
+# The latest release that actually exists on GitHub (prints e.g. 21).
+git ls-remote --tags --refs origin \
+  | sed -E 's#.*refs/tags/V([0-9]+)$#\1#' \
+  | grep -E '^[0-9]+$' | sort -n | tail -n 1
 ```
 
-With the tags `V1` to `V11` the version under development is `V12`, so the
-entry goes into `changelogs/V12.md`.
+If the GitHub CLI is available, `gh release list --limit 1` prints the same
+release together with its notes. On Windows, plain
+`git ls-remote --tags --refs origin` and reading the highest `V` number gives
+the same answer. Local tags, `git describe --tags` and `changelogs/*.md` are
+only hints; the remote is the answer.
+
+With `V21` as the latest release, the version under development is `V22`, so
+the entry goes into `changelogs/V22.md`.
 
 Rules:
 
-1. Add your entry to `changelogs/V<next version>.md`. Create that file with
+1. Check the latest release on the remote when you start and again before you
+   finish: another release may have been published in between. Re-check it
+   instead of reusing a number you captured earlier in the session.
+2. Add your entry to `changelogs/V<next version>.md`. Create that file with
    the heading `# V<next version>` when it does not exist yet.
-2. Never move your entry to another version file. If a `V<n>.md` file has a
-   matching git tag, that version is already released and its notes are shown
-   to everyone who updated to it. Fixing a released version means describing
-   the fix in the *new* version file.
-3. If your work is big enough to deserve its own release, say so in your
-   summary. The number is still picked by the release workflow, so the file
-   name always follows the tags.
+3. Never move your entry to another version file. If a `V<n>` tag exists on the
+   remote, that version is already released and its notes are shown to everyone
+   who updated to it. Fixing a released version means describing the fix in the
+   *new* version file.
+4. If your work is big enough to deserve its own release, say so in your
+   summary. The number is still picked by the release workflow from the
+   published tags, so the file name always follows the releases.
 
 ### How a changelog file looks
 
