@@ -72,7 +72,9 @@ object PromptFormat {
         )
         PromptStyle.LFM2 -> lfm2(
             system = system,
-            turns = turns
+            turns = turns,
+            enableThinking = enableThinking,
+            reasoningLevel = reasoningLevel
         )
     }
 
@@ -172,16 +174,74 @@ object PromptFormat {
             .replace("/think", "")
             .trim()
 
-        val prompt = StringBuilder(256 + turns.sumOf { it.content.length })
+        val systemBlock = StringBuilder()
         if (customInstructions.isNotEmpty()) {
-            prompt.append("<|im_start|>system\n").append(customInstructions)
+            systemBlock.append("<|im_start|>system\n").append(customInstructions)
             if (reasoningMode == "/think" && reasoningLevel.usesThinking) {
-                prompt.append("\n\n").append(reasoningLevel.instruction)
+                systemBlock.append("\n\n").append(reasoningLevel.instruction)
             }
-            prompt.append("<|im_end|>\n")
+            systemBlock.append("<|im_end|>\n")
         } else if (reasoningMode == "/no_think") {
-            prompt.append("<|im_start|>system\n/no_think<|im_end|>\n")
+            systemBlock.append("<|im_start|>system\n/no_think<|im_end|>\n")
         }
+
+        return chatMl(systemBlock.toString(), turns, reasoningMode)
+    }
+
+    /**
+     * Chat template of the LFM2.5 family (Liquid AI).
+     *
+     * The upstream `chat_template.jinja` is plain ChatML: every turn is
+     * wrapped in `<|im_start|>`/`<|im_end|>` markers and the generation prompt
+     * is `<|im_start|>assistant\n`.
+     *
+     * The Thinking checkpoint reasons before it answers, so the assistant
+     * turn is prefilled with `<think>` to open the reasoning block. The
+     * reasoning phase is skipped by closing an empty think block instead, the
+     * same way the Qwen3 template does it.
+     */
+    fun lfm2(
+        system: String,
+        turns: List<Turn>,
+        enableThinking: Boolean,
+        reasoningLevel: ReasoningLevel =
+            if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
+    ): String {
+        val reasoningMode = resolveReasoningMode(system, enableThinking, reasoningLevel)
+
+        val customInstructions = system
+            .replace("/no_think", "")
+            .replace("/think", "")
+            .trim()
+
+        val systemBlock = StringBuilder()
+        if (customInstructions.isNotEmpty()) {
+            systemBlock.append("<|im_start|>system\n").append(customInstructions)
+            if (reasoningMode == "/think" && reasoningLevel.usesThinking) {
+                systemBlock.append("\n\n").append(reasoningLevel.instruction)
+            }
+            systemBlock.append("<|im_end|>\n")
+        }
+
+        return chatMl(systemBlock.toString(), turns, reasoningMode)
+    }
+
+    /**
+     * Renders a plain ChatML prompt: the system block, the turns and the
+     * assistant turn that is being continued.
+     *
+     * Qwen3 and LFM2.5 share this layout, only the system block and the way
+     * the reasoning phase is switched differ.
+     */
+    private fun chatMl(
+        systemBlock: String,
+        turns: List<Turn>,
+        reasoningMode: String
+    ): String {
+        val prompt = StringBuilder(
+            systemBlock.length + 256 + turns.sumOf { it.content.length }
+        )
+        prompt.append(systemBlock)
 
         for (turn in turns) {
             when (turn.role) {
@@ -207,59 +267,10 @@ object PromptFormat {
         if (reasoningMode == "/no_think") {
             prompt.append("<think>\n\n</think>\n")
         } else {
+            // Prefill the opening tag so the model is forced to continue inside
+            // a reasoning block instead of silently skipping the think phase.
             prompt.append("<think>\n")
         }
-
-        return prompt.toString()
-    }
-
-    /**
-     * Chat template of the LFM2 family (Liquid AI).
-     *
-     * The template is a plain list of roles and their content without any
-     * turn markers:
-     *
-     * ```
-     * system
-     * You are a helpful assistant.
-     * user
-     * What is C. elegans?
-     * assistant
-     * ```
-     *
-     * The model has no thinking mode, so the reasoning arguments are ignored.
-     */
-    fun lfm2(
-        system: String,
-        turns: List<Turn>
-    ): String {
-        val prompt = StringBuilder(256 + turns.sumOf { it.content.length })
-
-        if (system.isNotBlank()) {
-            prompt.append("system\n").append(system).append("\n")
-        }
-
-        for (turn in turns) {
-            when (turn.role) {
-                "assistant" -> {
-                    prompt.append("assistant\n")
-                        .append(turn.content.trimStart('\n'))
-                        .append("\n")
-                }
-                "tool" -> {
-                    prompt.append("tool\n")
-                        .append(turn.content.trim())
-                        .append("\n")
-                }
-                else -> {
-                    prompt.append("user\n")
-                        .append(turn.content)
-                        .append("\n")
-                }
-            }
-        }
-
-        prompt.append("assistant\n")
 
         return prompt.toString()
     }

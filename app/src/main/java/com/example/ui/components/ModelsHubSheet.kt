@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.DownloadProgressInfo
 import com.example.model.ModelDownloadState
+import com.example.model.ModelHubTab
 import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.model.SpeechEngineState
@@ -111,6 +112,9 @@ fun ModelsHubSheet(
     if (!isOpen) return
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // The hub holds every kind of model, so each kind gets its own tab.
+    var selectedTab by remember { mutableStateOf(ModelHubTab.TEXT) }
 
     // The voice list is long, so it stays folded away until the user asks
     // for it.
@@ -179,166 +183,196 @@ fun ModelsHubSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Models and speech engines share one scroll area.
+            // The tabs stay above the scroll area, so the kind of model the
+            // user is looking at is always visible.
+            ModelHubTabRow(
+                selectedTab = selectedTab,
+                onSelectTab = { selectedTab = it }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Every tab has its own list of models.
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .testTag("model_hub_list"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                item(key = "speech_header") {
-                    SectionHeader("ON-DEVICE SPEECH")
-                }
+                when (selectedTab) {
+                    ModelHubTab.TEXT -> {
+                        item(key = "models_header") {
+                            Column {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                SectionHeader("AVAILABLE LOCAL WEIGHTS")
+                            }
+                        }
 
-                item(key = "speech_stt") {
-                    SpeechFeatureCard(
-                        title = "Speech to Text",
-                        subtitle = "Whisper Tiny (int8) • offline dictation",
-                        model = SpeechModelProfile.WHISPER_TINY,
-                        enabled = sttEnabled,
-                        state = sttState,
-                        error = sttError,
-                        downloadInfo = downloadStates[SpeechModelProfile.WHISPER_TINY.id],
-                        onToggle = onToggleStt
-                    )
-                }
+                        items(models, key = { it.id }) { model ->
+                            val downloadInfo = downloadStates[model.id]
+                            val isDownloaded = model.downloadState == ModelDownloadState.DOWNLOADED ||
+                                    downloadInfo?.state == ModelDownloadState.DOWNLOADED
+                            val isDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
+                            val isCurrentActive = model.id == currentModel.id
+                            val isLoaded = isCurrentActive && loadState == ModelLoadState.LOADED
+                            val isLoading = isCurrentActive && loadState == ModelLoadState.LOADING
+                            val isUnloading = isCurrentActive && loadState == ModelLoadState.UNLOADING
 
-                item(key = "speech_tts") {
-                    SpeechFeatureCard(
-                        title = "Text to Speech",
-                        subtitle = "${selectedTtsVoice.name} • ${selectedTtsVoice.language} • offline read-aloud",
-                        model = selectedTtsVoice,
-                        enabled = ttsEnabled,
-                        state = ttsState,
-                        error = ttsError,
-                        downloadInfo = downloadStates[selectedTtsVoice.id],
-                        onToggle = onToggleTts,
-                        trailing = {
-                            IconButton(
-                                onClick = { onPreviewTtsVoice(selectedTtsVoice) },
-                                enabled = selectedTtsVoice.id in downloadedTtsVoices &&
-                                    previewingTtsVoiceId == null,
-                                modifier = Modifier.testTag("tts_preview_current")
-                            ) {
-                                if (previewingTtsVoiceId == selectedTtsVoice.id) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = TelemetryCyan
+                            ModelCard(
+                                model = model,
+                                isActive = isCurrentActive,
+                                isLoaded = isLoaded,
+                                isLoading = isLoading,
+                                isUnloading = isUnloading,
+                                isDownloaded = isDownloaded,
+                                isDownloading = isDownloading,
+                                downloadInfo = downloadInfo,
+                                onSelectAndLoad = {
+                                    onSelectAndLoadModel(model)
+                                    onDismiss()
+                                },
+                                onUnload = onUnloadModel,
+                                onDownload = { onDownloadModel(model) },
+                                onReinstall = { onReinstallModel(model) },
+                                onDelete = { onDeleteModel(model.id) }
+                            )
+                        }
+                    }
+
+                    ModelHubTab.STT -> {
+                        item(key = "speech_header") {
+                            SectionHeader("ON-DEVICE SPEECH")
+                        }
+
+                        item(key = "speech_stt") {
+                            SpeechFeatureCard(
+                                title = "Speech to Text",
+                                subtitle = "Whisper Tiny (int8) • offline dictation",
+                                model = SpeechModelProfile.WHISPER_TINY,
+                                enabled = sttEnabled,
+                                state = sttState,
+                                error = sttError,
+                                downloadInfo = downloadStates[SpeechModelProfile.WHISPER_TINY.id],
+                                onToggle = onToggleStt
+                            )
+                        }
+                    }
+
+                    ModelHubTab.TTS -> {
+                        item(key = "speech_header") {
+                            SectionHeader("ON-DEVICE SPEECH")
+                        }
+
+                        item(key = "speech_tts") {
+                            SpeechFeatureCard(
+                                title = "Text to Speech",
+                                subtitle = "${selectedTtsVoice.name} • ${selectedTtsVoice.language} • offline read-aloud",
+                                model = selectedTtsVoice,
+                                enabled = ttsEnabled,
+                                state = ttsState,
+                                error = ttsError,
+                                downloadInfo = downloadStates[selectedTtsVoice.id],
+                                onToggle = onToggleTts,
+                                trailing = {
+                                    IconButton(
+                                        onClick = { onPreviewTtsVoice(selectedTtsVoice) },
+                                        enabled = selectedTtsVoice.id in downloadedTtsVoices &&
+                                            previewingTtsVoiceId == null,
+                                        modifier = Modifier.testTag("tts_preview_current")
+                                    ) {
+                                        if (previewingTtsVoiceId == selectedTtsVoice.id) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = TelemetryCyan
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = "Preview the current voice",
+                                                tint = TelemetryCyan,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        item(key = "speech_tts_voices") {
+                            Column {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { voicePickerExpanded = !voicePickerExpanded }
+                                        .testTag("tts_voice_picker_toggle"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "VOICES",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            letterSpacing = 1.sp
+                                        ),
+                                        color = TextMuted
                                     )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Preview the current voice",
-                                        tint = TelemetryCyan,
-                                        modifier = Modifier.size(20.dp)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = selectedTtsVoice.name,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 10.5.sp,
+                                                color = TelemetryCyan
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Icon(
+                                            imageVector = if (voicePickerExpanded) {
+                                                Icons.Default.ExpandLess
+                                            } else {
+                                                Icons.Default.ExpandMore
+                                            },
+                                            contentDescription = if (voicePickerExpanded) {
+                                                "Hide the voices"
+                                            } else {
+                                                "Show the voices"
+                                            },
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                if (voicePickerExpanded) {
+                                    TtsVoiceList(
+                                        voices = ttsVoices,
+                                        selectedVoice = selectedTtsVoice,
+                                        downloadedVoices = downloadedTtsVoices,
+                                        downloadStates = downloadStates,
+                                        previewingVoiceId = previewingTtsVoiceId,
+                                        onSelectVoice = onSelectTtsVoice,
+                                        onDownloadVoice = onDownloadTtsVoice,
+                                        onPreviewVoice = onPreviewTtsVoice,
+                                        onDeleteVoice = onDeleteTtsVoice
                                     )
                                 }
                             }
                         }
-                    )
-                }
+                    }
 
-                item(key = "speech_tts_voices") {
-                    Column {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { voicePickerExpanded = !voicePickerExpanded }
-                                .testTag("tts_voice_picker_toggle"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "VOICES",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    letterSpacing = 1.sp
-                                ),
-                                color = TextMuted
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = selectedTtsVoice.name,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 10.5.sp,
-                                        color = TelemetryCyan
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Icon(
-                                    imageVector = if (voicePickerExpanded) {
-                                        Icons.Default.ExpandLess
-                                    } else {
-                                        Icons.Default.ExpandMore
-                                    },
-                                    contentDescription = if (voicePickerExpanded) {
-                                        "Hide the voices"
-                                    } else {
-                                        "Show the voices"
-                                    },
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (voicePickerExpanded) {
-                            TtsVoiceList(
-                                voices = ttsVoices,
-                                selectedVoice = selectedTtsVoice,
-                                downloadedVoices = downloadedTtsVoices,
-                                downloadStates = downloadStates,
-                                previewingVoiceId = previewingTtsVoiceId,
-                                onSelectVoice = onSelectTtsVoice,
-                                onDownloadVoice = onDownloadTtsVoice,
-                                onPreviewVoice = onPreviewTtsVoice,
-                                onDeleteVoice = onDeleteTtsVoice
-                            )
+                    ModelHubTab.IMAGE,
+                    ModelHubTab.MUSIC,
+                    ModelHubTab.VIDEO -> {
+                        item(key = "work_in_progress") {
+                            WorkInProgressPanel(title = selectedTab.title)
                         }
                     }
-                }
-
-                item(key = "models_header") {
-                    Column {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SectionHeader("AVAILABLE LOCAL WEIGHTS")
-                    }
-                }
-
-                items(models, key = { it.id }) { model ->
-                    val downloadInfo = downloadStates[model.id]
-                    val isDownloaded = model.downloadState == ModelDownloadState.DOWNLOADED ||
-                            downloadInfo?.state == ModelDownloadState.DOWNLOADED
-                    val isDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
-                    val isCurrentActive = model.id == currentModel.id
-                    val isLoaded = isCurrentActive && loadState == ModelLoadState.LOADED
-                    val isLoading = isCurrentActive && loadState == ModelLoadState.LOADING
-                    val isUnloading = isCurrentActive && loadState == ModelLoadState.UNLOADING
-
-                    ModelCard(
-                        model = model,
-                        isActive = isCurrentActive,
-                        isLoaded = isLoaded,
-                        isLoading = isLoading,
-                        isUnloading = isUnloading,
-                        isDownloaded = isDownloaded,
-                        isDownloading = isDownloading,
-                        downloadInfo = downloadInfo,
-                        onSelectAndLoad = {
-                            onSelectAndLoadModel(model)
-                            onDismiss()
-                        },
-                        onUnload = onUnloadModel,
-                        onDownload = { onDownloadModel(model) },
-                        onReinstall = { onReinstallModel(model) },
-                        onDelete = { onDeleteModel(model.id) }
-                    )
                 }
             }
         }

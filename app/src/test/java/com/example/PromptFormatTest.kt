@@ -6,7 +6,6 @@ import com.example.model.ReasoningLevel
 import com.example.model.ThinkStreamSplitter
 import com.example.model.Utf8StreamDecoder
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -153,17 +152,32 @@ class PromptFormatTest {
     }
 
     @Test
-    fun `lfm2 prompt uses the plain role list of the model`() {
+    fun `lfm2 prompt uses the chatml layout of the model and prefills think`() {
         val prompt = PromptFormat.lfm2(
             system = "Be helpful",
-            turns = listOf(PromptFormat.Turn("user", "Hello"))
+            turns = listOf(PromptFormat.Turn("user", "Hello")),
+            enableThinking = true
         )
 
-        assertEquals("system\nBe helpful\nuser\nHello\nassistant\n", prompt)
+        assertTrue(prompt.startsWith("<|im_start|>system\nBe helpful\n\n"))
+        assertTrue(prompt.contains("<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n"))
+        assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n"))
     }
 
     @Test
-    fun `lfm2 prompt keeps the tool turns and has no think block`() {
+    fun `lfm2 no-think mode closes an empty think block`() {
+        val prompt = PromptFormat.lfm2(
+            system = "Be helpful",
+            turns = listOf(PromptFormat.Turn("user", "Hello")),
+            enableThinking = true,
+            reasoningLevel = ReasoningLevel.NONE
+        )
+
+        assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n\n</think>\n"))
+    }
+
+    @Test
+    fun `lfm2 prompt keeps the tool turns`() {
         val prompt = PromptFormat.render(
             style = PromptStyle.LFM2,
             system = "Be helpful",
@@ -176,10 +190,9 @@ class PromptFormatTest {
             today = "11 November 2026"
         )
 
-        assertTrue(prompt.contains("assistant\nHi!\n"))
-        assertTrue(prompt.contains("tool\n12 degrees\n"))
-        assertTrue(prompt.endsWith("assistant\n"))
-        assertFalse(prompt.contains("think"))
+        assertTrue(prompt.contains("<|im_start|>assistant\nHi!<|im_end|>\n"))
+        assertTrue(prompt.contains("<|im_start|>tool\n12 degrees<|im_end|>\n"))
+        assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n"))
     }
 }
 

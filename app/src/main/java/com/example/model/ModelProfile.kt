@@ -99,35 +99,39 @@ data class ModelProfile(
         )
 
         /**
-         * Liquid AI's LFM2.5-350M, the smallest instruction tuned model of the
-         * family.
+         * Liquid AI's LFM2.5-1.2B-Thinking, the reasoning model of the family.
          *
          * The checkpoint mixes convolution and attention layers, so it needs
-         * little memory and decodes fast on a phone. Q8_0 keeps the quality of
-         * the 350M weights intact: the file is 361 MB and most of the context
-         * lives in the cheap convolution state instead of the KV cache.
+         * little memory and decodes fast on a phone. Q4_K_M is the smallest
+         * quantisation that keeps the quality of the 1.2B weights intact: the
+         * file is 697 MB and most of the context lives in the cheap
+         * convolution state instead of the KV cache.
+         *
+         * Unlike the plain instruction tuned checkpoints it was trained with
+         * a reasoning phase, so it thinks before it answers and the thinking
+         * can be folded away in the UI.
          */
-        val LFM2_5_350M = ModelProfile(
-            id = "lfm2.5-350m",
-            name = "LFM2.5-350M",
+        val LFM2_5_1_2B_THINKING = ModelProfile(
+            id = "lfm2.5-1.2b-thinking",
+            name = "LFM2.5-1.2B-Thinking",
             shortName = "LFM2.5",
             format = ModelFormat.GGUF,
-            quantization = "Q8_0",
-            parameters = "350M",
+            quantization = "Q4_K_M",
+            parameters = "1.2B",
             contextLength = 32768,
-            memoryMb = 500,
-            downloadSizeMb = 361,
-            modelScopeRepo = "LiquidAI/LFM2.5-350M-GGUF",
-            modelScopeFile = "LFM2.5-350M-Q8_0.gguf",
-            hfRepo = "LiquidAI/LFM2.5-350M-GGUF",
-            hfFile = "LFM2.5-350M-Q8_0.gguf",
-            modelScopeUrl = "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF",
-            description = "Liquid AI's LFM2.5-350M, a hybrid convolution and attention model built for fast on-device chat.",
-            supportsReasoning = false,
+            memoryMb = 1100,
+            downloadSizeMb = 697,
+            modelScopeRepo = "LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
+            modelScopeFile = "LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+            hfRepo = "LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
+            hfFile = "LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+            modelScopeUrl = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
+            description = "Liquid AI's LFM2.5-1.2B-Thinking, a hybrid convolution and attention model that reasons before it answers.",
+            supportsReasoning = true,
             promptStyle = PromptStyle.LFM2,
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )
 
-        val DEFAULT_MODELS = listOf(QWEN3_0_6B, DEEP_SMOLLM3, LFM2_5_350M)
+        val DEFAULT_MODELS = listOf(QWEN3_0_6B, DEEP_SMOLLM3, LFM2_5_1_2B_THINKING)
     }
 }
