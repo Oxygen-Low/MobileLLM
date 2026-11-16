@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.random.Random
 
 /** Lifecycle of the image engine. */
 enum class ImageEngineState {
@@ -197,7 +196,11 @@ class ImageEngineManager(
 
         _isGenerating.value = true
         return try {
-            val seed = request.seed ?: Random.nextInt()
+            // A prompt owns its colours and its default seed. Without this the
+            // sampler picked both from chance, so the same description produced
+            // a different, arbitrarily coloured picture on every call.
+            val palette = PromptPalette.from(request.prompt)
+            val seed = request.seed ?: PromptPalette.seedFor(request.prompt)
             val pixels = withContext(Dispatchers.IO) {
                 ImageBridge.nativeGenerateImage(
                     active,
@@ -205,7 +208,10 @@ class ImageEngineManager(
                     request.width,
                     request.height,
                     request.steps,
-                    seed
+                    seed,
+                    palette.hueA,
+                    palette.hueB,
+                    palette.saturation
                 )
             }
             if (pixels == null) {

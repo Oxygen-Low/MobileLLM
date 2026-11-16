@@ -25,6 +25,10 @@ object VideoBridge {
     /**
      * Samples the frames of one clip from [prompt].
      *
+     * The hue and saturation anchors come from the prompt (see PromptPalette),
+     * so the whole clip keeps the colours that were asked for while the noise
+     * field slides over time. The seed only decides the layout of that field.
+     *
      * @return `frameCount * width * height * 4` bytes of RGBA, or null on error.
      */
     external fun nativeGenerateVideo(
@@ -34,7 +38,10 @@ object VideoBridge {
         height: Int,
         frameCount: Int,
         steps: Int,
-        seed: Int
+        seed: Int,
+        hueA: Float,
+        hueB: Float,
+        saturation: Float
     ): ByteArray?
 
     /**

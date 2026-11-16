@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.random.Random
 
 /** Lifecycle of the video engine. */
 enum class VideoEngineState {
@@ -205,7 +204,11 @@ class VideoEngineManager(
 
         _isGenerating.value = true
         return try {
-            val seed = request.seed ?: Random.nextInt()
+            // The palette belongs to the description, not to a coin flip. This
+            // keeps every frame in the prompt's colours and makes a repeated
+            // prompt draw the same clip instead of a new random pattern.
+            val palette = PromptPalette.from(request.prompt)
+            val seed = request.seed ?: PromptPalette.seedFor(request.prompt)
             val model = _selected.value
             val frames = withContext(Dispatchers.IO) {
                 VideoBridge.nativeGenerateVideo(
@@ -215,7 +218,10 @@ class VideoEngineManager(
                     request.height,
                     request.frameCount,
                     request.steps,
-                    seed
+                    seed,
+                    palette.hueA,
+                    palette.hueB,
+                    palette.saturation
                 )
             }
             val expectedFrames = request.frameCount.toLong() * request.width * request.height * 4

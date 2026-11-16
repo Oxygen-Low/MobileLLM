@@ -8,10 +8,12 @@
 // library.
 //
 // The sampler is a small field renderer with a time axis: it folds the model
-// file, the prompt and the frame number into a deterministic picture and a
-// short ambient track. It is the built in engine the app ships with, and it
-// deliberately keeps the same surface a diffusion backend would expose, so the
-// weights can be swapped for a real sampler without touching the Kotlin
+// file and the prompt into a seed and paints a deterministic picture and a
+// short ambient track. The colour anchors arrive from Kotlin, derived from the
+// prompt's own words, so the clip keeps those colours as it moves instead of
+// morphing a random pattern. It is the built in engine the app ships with, and
+// it deliberately keeps the same surface a diffusion backend would expose, so
+// the weights can be swapped for a real sampler without touching the Kotlin
 // callers.
 
 #include <jni.h>
@@ -112,17 +114,16 @@ void hsv_to_rgb(float h, float s, float v, float &r, float &g, float &b) {
     }
 }
 
-// Paints one frame of the clip. Returns false when the pass was cancelled.
+// Paints one frame of the clip. The palette comes from the prompt and is the
+// same for every frame, so the clip keeps the colours that were asked for
+// while the noise field slides over time. Returns false when cancelled.
 bool render_frame(const VideoEngine &engine, const std::string &prompt, int width, int height,
                   int steps, uint32_t seed, int frame, int frame_count,
+                  float hue_a, float hue_b, float saturation,
                   std::vector<unsigned char> &pixels) {
     const uint32_t salt = static_cast<uint32_t>(
         engine.seed ^ hash_bytes(prompt.data(), prompt.size(), seed));
     const uint32_t salt_b = mix(salt ^ 0x9E3779B9u);
-
-    const float hue_a = static_cast<float>((salt >> 8) & 0xFFFFu) / 65535.0f;
-    const float hue_b = hue_a + 0.25f + static_cast<float>((salt >> 24) & 0xFFu) / 255.0f * 0.5f;
-    const float saturation = 0.45f + static_cast<float>((salt >> 3) & 0x3Fu) / 63.0f * 0.4f;
 
     const int octaves = steps <= 4 ? 4 : (steps <= 12 ? 5 : 6);
     const float scale = 3.0f + static_cast<float>(steps) * 0.15f;
@@ -300,7 +301,7 @@ Java_com_example_model_internal_VideoBridge_nativeCancelVideoGeneration(
 JNIEXPORT jbyteArray JNICALL
 Java_com_example_model_internal_VideoBridge_nativeGenerateVideo(
     JNIEnv *env, jobject, jlong handle, jstring prompt, jint width, jint height,
-    jint frameCount, jint steps, jint seed) {
+    jint frameCount, jint steps, jint seed, jfloat hue_a, jfloat hue_b, jfloat saturation) {
     VideoEngine *engine = as_engine(handle);
     if (engine == nullptr) return nullptr;
 
@@ -326,7 +327,7 @@ Java_com_example_model_internal_VideoBridge_nativeGenerateVideo(
                                     static_cast<uint32_t>(engine->seed >> 32);
         for (int frame = 0; frame < frameCount; ++frame) {
             if (!render_frame(*engine, text, width, height, steps, paint_seed,
-                              frame, frameCount, pixels)) {
+                              frame, frameCount, hue_a, hue_b, saturation, pixels)) {
                 return nullptr;
             }
         }

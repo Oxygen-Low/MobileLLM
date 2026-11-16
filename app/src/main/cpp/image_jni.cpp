@@ -6,10 +6,13 @@
 // depend on an image library.
 //
 // The sampler is a small field renderer: it folds the model file and the
-// prompt into a seed and paints a deterministic picture from it. It is the
-// built in engine the app ships with, and it deliberately keeps the same
-// surface a diffusion backend would expose, so the weights can be swapped for
-// a real sampler without touching the Kotlin callers.
+// prompt into a seed and paints a deterministic picture from it. The colour
+// anchors arrive from Kotlin, derived from the prompt's own words, so the
+// picture is painted in the colours that were asked for instead of a random
+// palette taken from the seed. It is the built in engine the app ships with,
+// and it deliberately keeps the same surface a diffusion backend would expose,
+// so the weights can be swapped for a real sampler without touching the Kotlin
+// callers.
 
 #include <jni.h>
 #include <android/log.h>
@@ -107,17 +110,14 @@ void hsv_to_rgb(float h, float s, float v, float &r, float &g, float &b) {
     }
 }
 
-// Paints one deterministic picture from the seeds. Returns false when the
+// Paints one deterministic picture. The palette comes from the prompt, while
+// the seed only decides the layout of the noise field. Returns false when the
 // pass was cancelled.
 bool render(const ImageEngine &engine, const std::string &prompt, int width, int height,
-            int steps, uint32_t seed, std::vector<unsigned char> &pixels) {
+            int steps, uint32_t seed, float hue_a, float hue_b, float saturation,
+            std::vector<unsigned char> &pixels) {
     const uint32_t salt = static_cast<uint32_t>(engine.seed ^ hash_bytes(prompt.data(), prompt.size(), seed));
     const uint32_t salt_b = mix(salt);
-
-    // Two palette anchors per picture, taken from the seed.
-    const float hue_a = static_cast<float>((salt >> 8) & 0xFFFFu) / 65535.0f;
-    const float hue_b = hue_a + 0.25f + static_cast<float>((salt >> 24) & 0xFFu) / 255.0f * 0.5f;
-    const float saturation = 0.45f + static_cast<float>((salt >> 3) & 0x3Fu) / 63.0f * 0.4f;
 
     const int octaves = steps <= 4 ? 4 : (steps <= 12 ? 5 : 6);
     const float scale = 3.0f + static_cast<float>(steps) * 0.15f;
@@ -220,7 +220,7 @@ Java_com_example_model_internal_ImageBridge_nativeCancelImageGeneration(
 JNIEXPORT jbyteArray JNICALL
 Java_com_example_model_internal_ImageBridge_nativeGenerateImage(
     JNIEnv *env, jobject, jlong handle, jstring prompt, jint width, jint height,
-    jint steps, jint seed) {
+    jint steps, jint seed, jfloat hue_a, jfloat hue_b, jfloat saturation) {
     ImageEngine *engine = as_engine(handle);
     if (engine == nullptr) return nullptr;
 
@@ -246,7 +246,8 @@ Java_com_example_model_internal_ImageBridge_nativeGenerateImage(
 
         const uint32_t paint_seed = static_cast<uint32_t>(seed) ^
                                     static_cast<uint32_t>(engine->seed >> 32);
-        if (!render(*engine, text, width, height, steps, paint_seed, pixels)) {
+        if (!render(*engine, text, width, height, steps, paint_seed,
+                    hue_a, hue_b, saturation, pixels)) {
             return nullptr;
         }
 
