@@ -241,9 +241,9 @@ private fun ImageModelRow(
                             color = TelemetryCyan
                         )
                     )
-                    if (downloadInfo.speedMbps > 0f) {
+                    if (activeDownload.speedMbps > 0f) {
                         Text(
-                            text = "${downloadInfo.speedMbps} MB/s",
+                            text = "${activeDownload.speedMbps} MB/s",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp,
