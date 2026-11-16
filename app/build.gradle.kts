@@ -30,7 +30,7 @@ android {
   }
 
   defaultConfig {
-    applicationId = "com.aistudio.pocketlm.krfxwq"
+    applicationId = "com.oxygenlowsoftware.mobilellm"
     minSdk = 24
     targetSdk = 36
     versionCode = appVersionCode
