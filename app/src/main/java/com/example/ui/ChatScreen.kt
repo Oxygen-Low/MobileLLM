@@ -143,6 +143,11 @@ fun ChatScreen(
     val persistedReplyId by viewModel.persistedReplyId.collectAsStateWithLifecycle()
     val sandboxContent by viewModel.sandboxContent.collectAsStateWithLifecycle()
 
+    // Only hold the screen on for the work the user is waiting for: a reply
+    // being written or weights being downloaded. Idle browsing lets the phone
+    // sleep as usual.
+    KeepScreenOn(generating = isGenerating, downloads = downloadStates.values)
+
     // The sandbox and the replies can reference generated media by their
     // token. The WebView cannot read the app's files, so the media is inlined
     // as data: URIs right before it is handed to it.
