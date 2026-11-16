@@ -220,6 +220,39 @@ class SpeechEngineManager(
         downloadVoiceWeights(voice)
     }
 
+    /**
+     * Removes a voice from the device.
+     *
+     * The resident synthesizer still holds the weights of the voice that is
+     * about to be deleted, so they are released first. When the voice the app
+     * speaks with is the one that goes, another voice takes over, so the
+     * read-aloud is never left without weights.
+     */
+    suspend fun deleteVoice(voice: SpeechModelProfile) {
+        if (residentVoiceId == voice.id) {
+            unloadTts()
+        }
+
+        val remaining = SpeechModelProfile.TEXT_TO_SPEECH_MODELS
+            .filter { it.id != voice.id && it.isReady(downloads.speechDir) }
+
+        downloads.deleteSpeechModel(voice.id)
+        refreshDownloadedVoices()
+
+        if (_ttsVoice.value.id != voice.id) return
+
+        val replacement = SpeechModelProfile.fallbackVoice(voice, remaining)
+        preferences.textToSpeechVoiceId = replacement.id
+        _ttsVoice.value = replacement
+        _ttsError.value = null
+
+        if (_ttsEnabled.value && replacement.isReady(downloads.speechDir)) {
+            ensureTtsReady()
+        } else {
+            _ttsState.value = stateFromDisk(_ttsEnabled.value, replacement)
+        }
+    }
+
     /** Releases the weights without changing the user's toggle. */
     suspend fun releaseEngines() {
         unloadStt()

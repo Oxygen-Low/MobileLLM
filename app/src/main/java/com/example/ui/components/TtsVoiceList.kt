@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ import com.example.model.DownloadProgressInfo
 import com.example.model.ModelDownloadState
 import com.example.model.SpeechModelProfile
 import com.example.ui.theme.BorderSubtle
+import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TelemetryCyan
@@ -52,7 +54,8 @@ import com.example.ui.theme.TextSecondary
  *
  * Every row shows the voice, its language and how big it is. A voice that is
  * not on the device yet can be fetched without switching to it, so the user
- * can hear it before making it the voice of the app.
+ * can hear it before making it the voice of the app. A voice that is on the
+ * device can be removed again with the bin next to the preview button.
  */
 @Composable
 fun TtsVoiceList(
@@ -64,6 +67,7 @@ fun TtsVoiceList(
     onSelectVoice: (SpeechModelProfile) -> Unit,
     onDownloadVoice: (SpeechModelProfile) -> Unit,
     onPreviewVoice: (SpeechModelProfile) -> Unit,
+    onDeleteVoice: (SpeechModelProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -81,7 +85,8 @@ fun TtsVoiceList(
                 isPreviewing = previewingVoiceId == voice.id,
                 onSelect = { onSelectVoice(voice) },
                 onDownload = { onDownloadVoice(voice) },
-                onPreview = { onPreviewVoice(voice) }
+                onPreview = { onPreviewVoice(voice) },
+                onDelete = { onDeleteVoice(voice) }
             )
         }
     }
@@ -96,7 +101,8 @@ private fun TtsVoiceRow(
     isPreviewing: Boolean,
     onSelect: () -> Unit,
     onDownload: () -> Unit,
-    onPreview: () -> Unit
+    onPreview: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val isDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
 
@@ -189,6 +195,17 @@ private fun TtsVoiceRow(
                 color = TelemetryCyan
             )
         } else if (isDownloaded) {
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.testTag("tts_delete_${voice.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete ${voice.name}",
+                    tint = ErrorRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
             IconButton(
                 onClick = onPreview,
                 modifier = Modifier.testTag("tts_preview_${voice.id}")

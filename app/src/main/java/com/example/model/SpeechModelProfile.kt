@@ -294,6 +294,22 @@ data class SpeechModelProfile(
         val DEFAULT_TTS_VOICE = PIPER_AMY_LOW
 
         /**
+         * The voice the app speaks with after [removed] was deleted.
+         *
+         * A voice that is still on the device is preferred, so the read-aloud
+         * keeps working without a download. When nothing is left, the first
+         * voice of the catalogue takes over, because the removed one can
+         * never be the voice the app speaks with.
+         */
+        fun fallbackVoice(
+            removed: SpeechModelProfile,
+            remaining: List<SpeechModelProfile>
+        ): SpeechModelProfile =
+            remaining.firstOrNull { it.id != removed.id }
+                ?: TEXT_TO_SPEECH_MODELS.firstOrNull { it.id != removed.id }
+                ?: DEFAULT_TTS_VOICE
+
+        /**
          * Builds the profile of a Piper voice.
          *
          * Every voice is published as its own archive whose name follows the

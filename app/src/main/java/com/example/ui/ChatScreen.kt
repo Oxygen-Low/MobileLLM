@@ -545,6 +545,7 @@ fun ChatScreen(
         onSelectTtsVoice = { viewModel.selectTtsVoice(it) },
         onDownloadTtsVoice = { viewModel.downloadTtsVoice(it) },
         onPreviewTtsVoice = { viewModel.previewTtsVoice(it) },
+        onDeleteTtsVoice = { viewModel.deleteTtsVoice(it) },
         onSelectAndLoadModel = { viewModel.loadModel(it) },
         onUnloadModel = { viewModel.unloadModel() },
         onDownloadModel = { viewModel.downloadModel(it) },

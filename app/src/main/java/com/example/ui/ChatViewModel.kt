@@ -510,6 +510,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Removes a voice from the device.
+     *
+     * When the voice the app speaks with is deleted, another voice takes over
+     * so that the read-aloud keeps working.
+     */
+    fun deleteTtsVoice(voice: SpeechModelProfile) {
+        _speechError.value = null
+        stopSpeaking()
+        viewModelScope.launch {
+            speechEngineManager.deleteVoice(voice)
+            scheduleInactivityUnload()
+        }
+    }
+
+    /**
      * Reads a short sample with the given voice so the user can hear it.
      *
      * The preview borrows the synthesizer, so it stops whatever was playing

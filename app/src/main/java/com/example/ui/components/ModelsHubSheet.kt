@@ -100,6 +100,7 @@ fun ModelsHubSheet(
     onSelectTtsVoice: (SpeechModelProfile) -> Unit,
     onDownloadTtsVoice: (SpeechModelProfile) -> Unit,
     onPreviewTtsVoice: (SpeechModelProfile) -> Unit,
+    onDeleteTtsVoice: (SpeechModelProfile) -> Unit,
     onSelectAndLoadModel: (ModelProfile) -> Unit,
     onUnloadModel: () -> Unit,
     onDownloadModel: (ModelProfile) -> Unit,
@@ -296,7 +297,8 @@ fun ModelsHubSheet(
                                 previewingVoiceId = previewingTtsVoiceId,
                                 onSelectVoice = onSelectTtsVoice,
                                 onDownloadVoice = onDownloadTtsVoice,
-                                onPreviewVoice = onPreviewTtsVoice
+                                onPreviewVoice = onPreviewTtsVoice,
+                                onDeleteVoice = onDeleteTtsVoice
                             )
                         }
                     }
