@@ -3,10 +3,11 @@ package com.example.model
 /**
  * Chat prompt rendering.
  *
- * The template below mirrors the `chat_template.jinja` shipped with
- * Oxygen-Low/DeepSmolLM3-3B (a SmolLM3 fine-tune). llama.cpp does not ship a
- * jinja renderer, so this small hand-written version reproduces the same
- * output for the single system/user/assistant message shapes used by the app.
+ * Every model family ships its own `chat_template.jinja`. llama.cpp does not
+ * ship a jinja renderer, so these small hand-written versions reproduce the
+ * same output for the single system/user/assistant message shapes used by the
+ * app. The SmolLM3 template below is the one of
+ * Oxygen-Low/DeepSmolLM3-3B (a SmolLM3 fine-tune).
  */
 object PromptFormat {
 
@@ -68,6 +69,10 @@ object PromptFormat {
             turns = turns,
             enableThinking = enableThinking,
             reasoningLevel = reasoningLevel
+        )
+        PromptStyle.LFM2 -> lfm2(
+            system = system,
+            turns = turns
         )
     }
 
@@ -204,6 +209,57 @@ object PromptFormat {
         } else {
             prompt.append("<think>\n")
         }
+
+        return prompt.toString()
+    }
+
+    /**
+     * Chat template of the LFM2 family (Liquid AI).
+     *
+     * The template is a plain list of roles and their content without any
+     * turn markers:
+     *
+     * ```
+     * system
+     * You are a helpful assistant.
+     * user
+     * What is C. elegans?
+     * assistant
+     * ```
+     *
+     * The model has no thinking mode, so the reasoning arguments are ignored.
+     */
+    fun lfm2(
+        system: String,
+        turns: List<Turn>
+    ): String {
+        val prompt = StringBuilder(256 + turns.sumOf { it.content.length })
+
+        if (system.isNotBlank()) {
+            prompt.append("system\n").append(system).append("\n")
+        }
+
+        for (turn in turns) {
+            when (turn.role) {
+                "assistant" -> {
+                    prompt.append("assistant\n")
+                        .append(turn.content.trimStart('\n'))
+                        .append("\n")
+                }
+                "tool" -> {
+                    prompt.append("tool\n")
+                        .append(turn.content.trim())
+                        .append("\n")
+                }
+                else -> {
+                    prompt.append("user\n")
+                        .append(turn.content)
+                        .append("\n")
+                }
+            }
+        }
+
+        prompt.append("assistant\n")
 
         return prompt.toString()
     }

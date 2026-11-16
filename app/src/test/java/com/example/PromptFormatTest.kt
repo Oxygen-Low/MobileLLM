@@ -6,6 +6,7 @@ import com.example.model.ReasoningLevel
 import com.example.model.ThinkStreamSplitter
 import com.example.model.Utf8StreamDecoder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -149,6 +150,36 @@ class PromptFormatTest {
         )
 
         assertTrue(prompt.endsWith("<|im_start|>assistant\n<think>\n\n</think>\n"))
+    }
+
+    @Test
+    fun `lfm2 prompt uses the plain role list of the model`() {
+        val prompt = PromptFormat.lfm2(
+            system = "Be helpful",
+            turns = listOf(PromptFormat.Turn("user", "Hello"))
+        )
+
+        assertEquals("system\nBe helpful\nuser\nHello\nassistant\n", prompt)
+    }
+
+    @Test
+    fun `lfm2 prompt keeps the tool turns and has no think block`() {
+        val prompt = PromptFormat.render(
+            style = PromptStyle.LFM2,
+            system = "Be helpful",
+            turns = listOf(
+                PromptFormat.Turn("user", "Hello"),
+                PromptFormat.Turn("assistant", "Hi!"),
+                PromptFormat.Turn("tool", "12 degrees")
+            ),
+            enableThinking = true,
+            today = "11 November 2026"
+        )
+
+        assertTrue(prompt.contains("assistant\nHi!\n"))
+        assertTrue(prompt.contains("tool\n12 degrees\n"))
+        assertTrue(prompt.endsWith("assistant\n"))
+        assertFalse(prompt.contains("think"))
     }
 }
 

@@ -10,7 +10,8 @@ enum class ModelDownloadState {
 /** Chat template family used to render prompts for a model. */
 enum class PromptStyle {
     SMOLLM3,
-    QWEN3
+    QWEN3,
+    LFM2
 }
 
 data class ModelProfile(
@@ -97,6 +98,36 @@ data class ModelProfile(
             downloadState = ModelDownloadState.NOT_DOWNLOADED
         )
 
-        val DEFAULT_MODELS = listOf(QWEN3_0_6B, DEEP_SMOLLM3)
+        /**
+         * Liquid AI's LFM2.5-350M, the smallest instruction tuned model of the
+         * family.
+         *
+         * The checkpoint mixes convolution and attention layers, so it needs
+         * little memory and decodes fast on a phone. Q8_0 keeps the quality of
+         * the 350M weights intact: the file is 361 MB and most of the context
+         * lives in the cheap convolution state instead of the KV cache.
+         */
+        val LFM2_5_350M = ModelProfile(
+            id = "lfm2.5-350m",
+            name = "LFM2.5-350M",
+            shortName = "LFM2.5",
+            format = ModelFormat.GGUF,
+            quantization = "Q8_0",
+            parameters = "350M",
+            contextLength = 32768,
+            memoryMb = 500,
+            downloadSizeMb = 361,
+            modelScopeRepo = "LiquidAI/LFM2.5-350M-GGUF",
+            modelScopeFile = "LFM2.5-350M-Q8_0.gguf",
+            hfRepo = "LiquidAI/LFM2.5-350M-GGUF",
+            hfFile = "LFM2.5-350M-Q8_0.gguf",
+            modelScopeUrl = "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF",
+            description = "Liquid AI's LFM2.5-350M, a hybrid convolution and attention model built for fast on-device chat.",
+            supportsReasoning = false,
+            promptStyle = PromptStyle.LFM2,
+            downloadState = ModelDownloadState.NOT_DOWNLOADED
+        )
+
+        val DEFAULT_MODELS = listOf(QWEN3_0_6B, DEEP_SMOLLM3, LFM2_5_350M)
     }
 }

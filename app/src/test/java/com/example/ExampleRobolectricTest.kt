@@ -64,7 +64,14 @@ class ExampleRobolectricTest {
         assertEquals("Qwen3-0.6B-Q8_0.gguf", ModelProfile.QWEN3_0_6B.hfFile)
         assertEquals("Qwen/Qwen3-0.6B-GGUF", ModelProfile.QWEN3_0_6B.hfRepo)
         assertTrue(ModelProfile.QWEN3_0_6B.supportsReasoning)
-        assertEquals(2, ModelProfile.DEFAULT_MODELS.size)
+        assertEquals("lfm2.5-350m", ModelProfile.LFM2_5_350M.id)
+        assertEquals("350M", ModelProfile.LFM2_5_350M.parameters)
+        assertEquals("Q8_0", ModelProfile.LFM2_5_350M.quantization)
+        assertEquals("LFM2.5-350M-Q8_0.gguf", ModelProfile.LFM2_5_350M.modelScopeFile)
+        assertEquals("LFM2.5-350M-Q8_0.gguf", ModelProfile.LFM2_5_350M.hfFile)
+        assertEquals("LiquidAI/LFM2.5-350M-GGUF", ModelProfile.LFM2_5_350M.hfRepo)
+        assertFalse(ModelProfile.LFM2_5_350M.supportsReasoning)
+        assertEquals(3, ModelProfile.DEFAULT_MODELS.size)
         assertEquals("qwen3-0.6b", ModelProfile.DEFAULT_MODELS.first().id)
     }
 
