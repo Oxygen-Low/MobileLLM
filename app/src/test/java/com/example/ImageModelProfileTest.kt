@@ -26,6 +26,15 @@ class ImageModelProfileTest {
     }
 
     @Test
+    fun `every model has a Hugging Face source to download from`() {
+        ImageModelProfile.MODELS.forEach { model ->
+            assertTrue(model.hfRepo.isNotBlank())
+            assertTrue(model.hfFile.endsWith(".gguf"))
+            assertTrue(model.downloadSizeMb > 0)
+        }
+    }
+
+    @Test
     fun `the weights live in the same folder as the chat models`() {
         val root = tempFolder.newFolder("models")
         assertEquals(File(root, "${ImageModelProfile.SD_TURBO.id}.gguf"), ImageModelProfile.SD_TURBO.fileIn(root))

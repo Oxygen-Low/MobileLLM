@@ -81,8 +81,8 @@ class ModelDownloadManager(
 
     suspend fun startDownload(
         modelId: String,
-        repo: String,
-        filename: String,
+        repo: String?,
+        filename: String?,
         totalMb: Int,
         hfRepo: String? = null,
         hfFilename: String? = null,
@@ -99,11 +99,30 @@ class ModelDownloadManager(
 
         val part = File(modelsDir, "$modelId.gguf.part")
         val sources = buildList {
-            add(buildString { append("https://modelscope.cn/models/"); append(repo); append("/resolve/master/"); append(filename) })
+            // A model without a ModelScope mirror names no repository at all,
+            // so the failing mirror is skipped instead of tried first.
+            if (!repo.isNullOrBlank() && !filename.isNullOrBlank()) {
+                add(buildString { append("https://modelscope.cn/models/"); append(repo); append("/resolve/master/"); append(filename) })
+            }
             val hf = hfRepo ?: repo
             val hfFile = hfFilename ?: filename
-            add("https://huggingface.co/$hf/resolve/main/$hfFile")
-            add("https://hf-mirror.com/$hf/resolve/main/$hfFile")
+            if (!hf.isNullOrBlank() && !hfFile.isNullOrBlank()) {
+                add("https://huggingface.co/$hf/resolve/main/$hfFile")
+                add("https://hf-mirror.com/$hf/resolve/main/$hfFile")
+            }
+        }
+
+        if (sources.isEmpty()) {
+            publish(
+                modelId = modelId,
+                progress = 0f,
+                downloadedBytes = 0f,
+                totalBytes = expectedBytes.toFloat(),
+                speedMbps = 0f,
+                state = ModelDownloadState.ERROR,
+                error = "No download source is known for $modelId"
+            )
+            return@withContext
         }
 
         var lastError: String? = null

@@ -247,6 +247,19 @@ class ImageEngineManager(
                 hfFilename = model.hfFile
             ) { }
             refreshDownloaded()
+
+            // startDownload reports a failed transfer through the shared
+            // download states instead of throwing, so the engine has to read
+            // that report to leave "downloading" behind.
+            if (model.id == _selected.value.id) {
+                if (!model.isReady(downloads.modelsDir)) {
+                    _state.value = ImageEngineState.ERROR
+                    _error.value = downloads.downloadStates.value[model.id]?.error
+                        ?: "Could not download ${model.name}"
+                } else if (_state.value == ImageEngineState.DOWNLOADING) {
+                    _state.value = ImageEngineState.UNLOADED
+                }
+            }
         }
     }
 

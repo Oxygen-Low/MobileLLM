@@ -25,10 +25,16 @@ data class ImageModelProfile(
     val steps: Int,
     val memoryMb: Int,
     val description: String,
-    /** ModelScope repository slug, used as the first download source. */
-    val modelScopeRepo: String,
-    val modelScopeFile: String,
-    val modelScopeUrl: String,
+    /**
+     * ModelScope repository slug and file, used as the first download source.
+     *
+     * They are null for a checkpoint that ModelScope does not mirror: the
+     * installer then goes straight to Hugging Face instead of asking a mirror
+     * that cannot serve the file.
+     */
+    val modelScopeRepo: String?,
+    val modelScopeFile: String?,
+    val modelScopeUrl: String?,
     /** Hugging Face repository slug, used as a fallback download source. */
     val hfRepo: String,
     val hfFile: String,
@@ -64,12 +70,12 @@ data class ImageModelProfile(
             resolution = 512,
             steps = 4,
             memoryMb = 1600,
-            downloadSizeMb = 1700,
-            modelScopeRepo = "second-state/SD-Turbo-GGUF",
-            modelScopeFile = "sd-turbo-Q4_0.gguf",
-            hfRepo = "second-state/SD-Turbo-GGUF",
-            hfFile = "sd-turbo-Q4_0.gguf",
-            modelScopeUrl = "https://huggingface.co/second-state/SD-Turbo-GGUF",
+            downloadSizeMb = 1762,
+            modelScopeRepo = null,
+            modelScopeFile = null,
+            hfRepo = "samoudi/sd-turbo-gguf",
+            hfFile = "sd_turbo_q4_0.gguf",
+            modelScopeUrl = "https://huggingface.co/samoudi/sd-turbo-gguf",
             description = "A distilled turbo diffusion model that needs only a few sampling steps, the quickest way to a picture on a phone."
         )
 
@@ -86,11 +92,11 @@ data class ImageModelProfile(
             resolution = 512,
             steps = 20,
             memoryMb = 2000,
-            downloadSizeMb = 2100,
-            modelScopeRepo = "second-state/stable-diffusion-v1-5-GGUF",
-            modelScopeFile = "stable-diffusion-v1-5-Q4_0.gguf",
+            downloadSizeMb = 1494,
+            modelScopeRepo = null,
+            modelScopeFile = null,
             hfRepo = "second-state/stable-diffusion-v1-5-GGUF",
-            hfFile = "stable-diffusion-v1-5-Q4_0.gguf",
+            hfFile = "stable-diffusion-v1-5-pruned-emaonly-Q4_0.gguf",
             modelScopeUrl = "https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF",
             description = "The Stable Diffusion 1.5 base checkpoint. Slower than the turbo one but more faithful with long descriptions."
         )
