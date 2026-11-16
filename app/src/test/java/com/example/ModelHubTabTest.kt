@@ -38,7 +38,7 @@ class ModelHubTabTest {
 
     @Test
     fun `the tabs without models yet say so`() {
-        assertTrue(ModelHubTab.IMAGE.isWorkInProgress)
+        assertFalse(ModelHubTab.IMAGE.isWorkInProgress)
         assertTrue(ModelHubTab.MUSIC.isWorkInProgress)
         assertTrue(ModelHubTab.VIDEO.isWorkInProgress)
         assertFalse(ModelHubTab.TEXT.isWorkInProgress)

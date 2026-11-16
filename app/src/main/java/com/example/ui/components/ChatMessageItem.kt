@@ -3,7 +3,9 @@ package com.example.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,6 +50,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -56,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.ChatMessageEntity
+import com.example.image.Base64Codec
+import com.example.image.GeneratedImageReferences
 import com.example.ui.theme.BgDark
 import com.example.ui.theme.BorderSubtle
 import com.example.ui.theme.CardHighlight
@@ -67,6 +73,7 @@ import com.example.ui.theme.TerminalGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,7 +88,9 @@ fun ChatMessageItem(
     showRegenerate: Boolean = false,
     showThinkingPlaceholder: Boolean = true,
     onRewind: () -> Unit = {},
-    onRegenerate: () -> Unit = {}
+    onRegenerate: () -> Unit = {},
+    /** Resolves a `gen:<id>` reference to the file of a generated picture. */
+    imageResolver: ((String) -> File?)? = null
 ) {
     val context = LocalContext.current
     val isUser = message.role == "user"
@@ -175,7 +184,7 @@ fun ChatMessageItem(
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                     ) {
                         // Render rich text and syntax highlighted code blocks
-                        RichMessageContent(content = message.content)
+                        RichMessageContent(content = message.content, imageResolver = imageResolver)
 
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -275,7 +284,10 @@ fun ChatMessageItem(
  * Parses and renders markdown text with formatted code blocks and syntax header
  */
 @Composable
-private fun RichMessageContent(content: String) {
+private fun RichMessageContent(
+    content: String,
+    imageResolver: ((String) -> File?)? = null
+) {
     val context = LocalContext.current
     val parts = content.split("```")
 
@@ -293,7 +305,7 @@ private fun RichMessageContent(content: String) {
                         code.contains("<canvas", ignoreCase = true)
 
                 if (isHtml) {
-                    InteractiveHtmlBlock(code = code, lang = lang)
+                    InteractiveHtmlBlock(code = code, lang = lang, imageResolver = imageResolver)
                 } else {
                     Surface(
                         modifier = Modifier
@@ -370,16 +382,65 @@ private fun RichMessageContent(content: String) {
             } else {
                 // Regular prose text
                 if (part.isNotBlank()) {
-                    Text(
-                        text = part.trim(),
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 14.sp,
-                            lineHeight = 21.sp,
-                            color = TextPrimary
-                        ),
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
+                    val resolver = imageResolver
+                    val references = resolver?.let { GeneratedImageReferences.referencesIn(part) }.orEmpty()
+                    // A markdown picture reference is shown as the picture
+                    // itself, so the raw token is dropped from the text.
+                    val prose = part.replace(MARKDOWN_IMAGE, "").trim()
+
+                    if (prose.isNotEmpty()) {
+                        Text(
+                            text = prose,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp,
+                                color = TextPrimary
+                            ),
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+
+                    if (resolver != null && references.isNotEmpty()) {
+                        GeneratedImagesRow(references = references, resolver = resolver)
+                    }
                 }
+            }
+        }
+    }
+}
+
+/** A markdown image whose target is a generated picture. */
+private val MARKDOWN_IMAGE = Regex("!\\[[^\\]]*\\]\\(\\s*gen:[A-Za-z0-9_-]{1,64}\\s*\\)")
+
+/**
+ * Shows the pictures a reply referenced.
+ *
+ * The bitmap is decoded from the session file and cached per file, so the same
+ * picture is not decoded again on every recomposition.
+ */
+@Composable
+private fun GeneratedImagesRow(
+    references: List<String>,
+    resolver: (String) -> File?
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        references.forEach { id ->
+            val file = resolver(id) ?: return@forEach
+            val bitmap = remember(file.path, file.lastModified()) {
+                runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+            }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Generated picture",
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                        .testTag("generated_image_$id")
+                )
             }
         }
     }
@@ -388,11 +449,26 @@ private fun RichMessageContent(content: String) {
 @Composable
 private fun InteractiveHtmlBlock(
     code: String,
-    lang: String
+    lang: String,
+    imageResolver: ((String) -> File?)? = null
 ) {
     val context = LocalContext.current
     var isLivePreview by remember { mutableStateOf(true) }
     var isFullscreenOpen by remember { mutableStateOf(false) }
+
+    // The sandbox may point at generated pictures with gen:<id>. The WebView
+    // cannot read the app's files, so they are inlined as data: URIs.
+    val resolvedCode = remember(code, imageResolver) {
+        if (imageResolver == null) {
+            code
+        } else {
+            GeneratedImageReferences.inline(code) { id ->
+                imageResolver(id)?.let { file ->
+                    runCatching { "data:image/png;base64," + Base64Codec.encode(file.readBytes()) }.getOrNull()
+                }
+            }
+        }
+    }
 
     Surface(
         modifier = Modifier
@@ -540,7 +616,7 @@ private fun InteractiveHtmlBlock(
             // Body: Live Preview or Raw Code
             if (isLivePreview) {
                 HtmlPreviewView(
-                    htmlContent = code,
+                    htmlContent = resolvedCode,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(290.dp),
@@ -568,7 +644,7 @@ private fun InteractiveHtmlBlock(
     if (isFullscreenOpen) {
         FullscreenHtmlAppDialog(
             isOpen = true,
-            htmlContent = code,
+            htmlContent = resolvedCode,
             title = "Interactive HTML Game / App Sandbox",
             onDismiss = { isFullscreenOpen = false }
         )

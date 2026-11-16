@@ -84,8 +84,18 @@ class ModelEngineManager(
     private val mcpToolExecutor: MCPToolExecutor
 ) {
     private var handle: Long = 0L
+    private var currentModelFile: File? = null
     private val loadMutex = Mutex()
     private val random = Random()
+
+    /**
+     * Generates a picture with the image engine while the chat weights are out
+     * of memory. Installed by the view model, which owns both engines.
+     *
+     * A round that asks for a picture releases this engine, runs the hook and
+     * loads the chat model back, so the two engines never share the memory.
+     */
+    var imageGeneration: (suspend (prompt: String, sessionId: String?) -> ToolCallResponse)? = null
 
     private val _loadState = MutableStateFlow(ModelLoadState.UNLOADED)
     val loadState: StateFlow<ModelLoadState> = _loadState.asStateFlow()
@@ -139,6 +149,7 @@ class ModelEngineManager(
                 }
 
                 handle = newHandle
+                currentModelFile = file
                 _currentModel.value = profile
                 _allocatedMemoryMb.value = (file.length() / (1024 * 1024)).toInt()
                 _loadState.value = ModelLoadState.LOADED
@@ -170,6 +181,7 @@ class ModelEngineManager(
             runCatching { LlamaBridge.nativeFree(current) }
                 .onFailure { Log.e(TAG, "nativeFree failed", it) }
         }
+        currentModelFile = null
         _currentModel.value = null
         _allocatedMemoryMb.value = 0
         _currentTps.value = 0.0
@@ -214,6 +226,15 @@ class ModelEngineManager(
                 while (rounds < MAX_TOOL_ROUNDS && isActive) {
                     rounds++
 
+                    // The handle can change between rounds: a picture call
+                    // releases the chat weights and loads them back, so the
+                    // round has to read the handle it actually uses.
+                    val roundHandle = handle
+                    if (roundHandle == 0L || _loadState.value != ModelLoadState.LOADED) {
+                        trySend(GenerationEvent.Error("The model was unloaded during the turn."))
+                        break
+                    }
+
                     val system = buildSystemPrompt(model.name, systemDate)
                     val renderedPrompt = PromptFormat.render(
                         style = model.promptStyle,
@@ -226,7 +247,7 @@ class ModelEngineManager(
 
                     val round = generateRound(
                         scope = this,
-                        handle = activeHandle,
+                        handle = roundHandle,
                         system = system,
                         renderedPrompt = renderedPrompt,
                         enableThinking = enableThinking,
@@ -260,7 +281,7 @@ class ModelEngineManager(
                             preamble = round.displayContent
                         )
                     )
-                    val response = mcpToolExecutor.executeTool(call.first, call.second)
+                    val response = executeToolCall(call.first, call.second)
                     lastToolResult = response.result
                     trySend(
                         GenerationEvent.ToolResult(
@@ -312,8 +333,42 @@ class ModelEngineManager(
         }
 
         awaitClose {
-            LlamaBridge.nativeCancel(activeHandle)
+            LlamaBridge.nativeCancel(handle)
             worker.cancel()
+        }
+    }
+
+    /**
+     * Runs one tool call.
+     *
+     * A picture is the one call the executor cannot answer on its own: the
+     * chat model and the image model do not fit in memory together, so the
+     * weights are released, the picture is drawn and the chat model is brought
+     * back, all before the model continues the same turn.
+     */
+    private suspend fun executeToolCall(toolName: String, argument: String): ToolCallResponse {
+        val generator = imageGeneration
+        if (toolName != "generate_image" || generator == null) {
+            return mcpToolExecutor.executeTool(toolName, argument)
+        }
+
+        val profile = _currentModel.value
+        val file = currentModelFile
+        val sessionId = mcpToolExecutor.activeSessionId
+
+        // Free the chat weights first so the image model has the memory.
+        loadMutex.withLock { releaseEngine() }
+        _loadState.value = ModelLoadState.UNLOADED
+        _currentTps.value = 0.0
+        _allocatedMemoryMb.value = 0
+
+        return try {
+            generator(argument, sessionId)
+        } finally {
+            // Bring the conversation back, also when the picture failed.
+            if (profile != null && file != null) {
+                loadModel(profile, file)
+            }
         }
     }
 
@@ -522,6 +577,7 @@ class ModelEngineManager(
         builder.append("\n- For a new sandbox, call `edit_html_sandbox` with `{\"old_string\": \"\", \"new_string\": \"...\"}` to write the complete initial HTML file.")
         builder.append("\n- When modifying an existing sandbox, read it first with `read_html_sandbox` if needed, then use `edit_html_sandbox` with the exact unique `old_string` and the updated `new_string`.")
         builder.append("\nCall a tool whenever the answer depends on live information, the current date or time, arithmetic, or creating/editing an HTML sandbox app.")
+        builder.append("\nTo draw a picture, call generate_image with the description. The result names a reference token: show the picture in your reply as ![description](gen:ID) or in the HTML sandbox as <img src=\"gen:ID\">. Never invent an id, only use the one the tool returned.")
         return builder.toString()
     }
 

@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.example.data.ChatMessageEntity
+import com.example.image.GeneratedImageReferences
 import com.example.model.ModelDownloadState
 import com.example.model.ModelLoadState
 import com.example.ui.components.AgentStepItem
@@ -121,11 +122,26 @@ fun ChatScreen(
     val downloadedTtsVoices by viewModel.downloadedTtsVoices.collectAsStateWithLifecycle()
     val previewingTtsVoiceId by viewModel.previewingVoiceId.collectAsStateWithLifecycle()
 
+    // Image generation. A model is only resident while a picture is drawn.
+    val imageModels = viewModel.imageModels
+    val selectedImageModel by viewModel.selectedImageModel.collectAsStateWithLifecycle()
+    val downloadedImageModels by viewModel.downloadedImageModels.collectAsStateWithLifecycle()
+    val imageState by viewModel.imageState.collectAsStateWithLifecycle()
+    val imageError by viewModel.imageError.collectAsStateWithLifecycle()
+
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
     val agentSteps by viewModel.agentSteps.collectAsStateWithLifecycle()
     val persistedReplyId by viewModel.persistedReplyId.collectAsStateWithLifecycle()
     val sandboxContent by viewModel.sandboxContent.collectAsStateWithLifecycle()
+
+    // The sandbox and the replies can reference generated pictures by their
+    // token. The WebView cannot read the app's files, so the pictures are
+    // inlined as data: URIs right before they are handed to it.
+    val resolvedSandboxContent = remember(sandboxContent, currentSessionId) {
+        GeneratedImageReferences.inline(sandboxContent) { id -> viewModel.generatedImageDataUri(id) }
+    }
+    val generatedImageResolver: (String) -> java.io.File? = { id -> viewModel.generatedImageFile(id) }
 
     var isHistoryOpen by remember { mutableStateOf(false) }
     var isModelsHubOpen by remember { mutableStateOf(false) }
@@ -478,7 +494,8 @@ fun ChatScreen(
                             showRewind = !isGenerating && message.role == "assistant" && !isLastMessage,
                             showRegenerate = !isGenerating && message.role == "assistant" && isLastMessage,
                             onRewind = { viewModel.rewindToMessage(message.id) },
-                            onRegenerate = { viewModel.regenerateLastResponse() }
+                            onRegenerate = { viewModel.regenerateLastResponse() },
+                            imageResolver = generatedImageResolver
                         )
                     }
 
@@ -513,7 +530,8 @@ fun ChatScreen(
                                 message = activeMsg,
                                 modelName = currentModel.shortName,
                                 isStreaming = true,
-                                showThinkingPlaceholder = placeholder
+                                showThinkingPlaceholder = placeholder,
+                                imageResolver = generatedImageResolver
                             )
                         }
                     }
@@ -540,6 +558,11 @@ fun ChatScreen(
         selectedTtsVoice = selectedTtsVoice,
         downloadedTtsVoices = downloadedTtsVoices,
         previewingTtsVoiceId = previewingTtsVoiceId,
+        imageModels = imageModels,
+        selectedImageModel = selectedImageModel,
+        downloadedImageModels = downloadedImageModels,
+        imageState = imageState,
+        imageError = imageError,
         onToggleStt = { viewModel.setSpeechToTextEnabled(it) },
         onToggleTts = { viewModel.setTextToSpeechEnabled(it) },
         onSelectTtsVoice = { viewModel.selectTtsVoice(it) },
@@ -551,7 +574,10 @@ fun ChatScreen(
         onDownloadModel = { viewModel.downloadModel(it) },
         onReinstallModel = { viewModel.reinstallModel(it) },
         onDeleteModel = { viewModel.deleteDownloadedModel(it) },
-        onCancelDownload = { viewModel.cancelDownload(it) }
+        onCancelDownload = { viewModel.cancelDownload(it) },
+        onSelectImageModel = { viewModel.selectImageModel(it) },
+        onDownloadImageModel = { viewModel.downloadImageModel(it) },
+        onDeleteImageModel = { viewModel.deleteImageModel(it) }
     )
 
     // Chat History Drawer Modal
@@ -585,7 +611,7 @@ fun ChatScreen(
     if (isSandboxOpen && sandboxContent.isNotBlank()) {
         FullscreenHtmlAppDialog(
             isOpen = true,
-            htmlContent = sandboxContent,
+            htmlContent = resolvedSandboxContent,
             title = "Interactive App / Game Sandbox",
             onDismiss = { isSandboxOpen = false }
         )

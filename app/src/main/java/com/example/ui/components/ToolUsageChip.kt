@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Schedule
@@ -245,5 +246,6 @@ private fun toolIcon(toolName: String?): ImageVector = when (toolName) {
     "duckduckgo_search" -> Icons.Default.Language
     "get_current_datetime" -> Icons.Default.Schedule
     "calculate_expression" -> Icons.Default.Calculate
+    "generate_image" -> Icons.Default.Image
     else -> Icons.Default.Build
 }

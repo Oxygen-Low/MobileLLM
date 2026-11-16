@@ -56,6 +56,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.DownloadProgressInfo
+import com.example.model.ImageEngineState
+import com.example.model.ImageModelProfile
 import com.example.model.ModelDownloadState
 import com.example.model.ModelHubTab
 import com.example.model.ModelLoadState
@@ -93,6 +95,11 @@ fun ModelsHubSheet(
     selectedTtsVoice: SpeechModelProfile,
     downloadedTtsVoices: Set<String>,
     previewingTtsVoiceId: String?,
+    imageModels: List<ImageModelProfile> = emptyList(),
+    selectedImageModel: ImageModelProfile? = null,
+    downloadedImageModels: Set<String> = emptySet(),
+    imageState: ImageEngineState = ImageEngineState.UNLOADED,
+    imageError: String? = null,
     onToggleStt: (Boolean) -> Unit,
     onToggleTts: (Boolean) -> Unit,
     onSelectTtsVoice: (SpeechModelProfile) -> Unit,
@@ -105,6 +112,9 @@ fun ModelsHubSheet(
     onReinstallModel: (ModelProfile) -> Unit,
     onDeleteModel: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
+    onSelectImageModel: (ImageModelProfile) -> Unit = {},
+    onDownloadImageModel: (ImageModelProfile) -> Unit = {},
+    onDeleteImageModel: (ImageModelProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (!isOpen) return
@@ -336,7 +346,57 @@ fun ModelsHubSheet(
                         }
                     }
 
-                    ModelHubTab.IMAGE,
+                    ModelHubTab.IMAGE -> {
+                        item(key = "image_header") {
+                            Column {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                SectionHeader("ON-DEVICE IMAGE GENERATION")
+                            }
+                        }
+
+                        item(key = "image_models") {
+                            Column {
+                                val model = selectedImageModel
+                                if (model != null) {
+                                    Text(
+                                        text = "PICTURES ARE DRAWN WITH ${model.name.uppercase()}",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            letterSpacing = 0.5.sp
+                                        ),
+                                        color = TextMuted
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                                ImageModelList(
+                                    models = imageModels,
+                                    selectedModel = selectedImageModel,
+                                    downloadedModels = downloadedImageModels,
+                                    downloadStates = downloadStates,
+                                    onSelectModel = onSelectImageModel,
+                                    onDownloadModel = onDownloadImageModel,
+                                    onDeleteModel = onDeleteImageModel,
+                                    onCancelDownload = { image -> onCancelDownload(image.id) }
+                                )
+                                val imageMessage = imageError ?: downloadStates[selectedImageModel?.id]
+                                    ?.takeIf { it.state == ModelDownloadState.ERROR }
+                                    ?.error
+                                if (imageMessage != null && imageState == ImageEngineState.ERROR) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = imageMessage,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = ErrorRed
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     ModelHubTab.MUSIC,
                     ModelHubTab.VIDEO -> {
                         item(key = "work_in_progress") {

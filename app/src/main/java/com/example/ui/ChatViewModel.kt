@@ -12,10 +12,16 @@ import com.example.data.ChatRepository
 import com.example.data.ChatSessionEntity
 import com.example.data.ChatTranscript
 import com.example.data.ModelPreferences
+import com.example.image.GeneratedImage
+import com.example.image.GeneratedImageStore
+import com.example.image.ImagePromptParser
 import com.example.model.AgentStep
 import com.example.model.AgentTranscript
 import com.example.model.DownloadProgressInfo
 import com.example.model.GenerationEvent
+import com.example.model.ImageEngineManager
+import com.example.model.ImageEngineState
+import com.example.model.ImageModelProfile
 import com.example.model.ModelDownloadManager
 import com.example.model.ModelDownloadState
 import com.example.model.ModelEngineManager
@@ -29,6 +35,7 @@ import com.example.model.SpeechModelProfile
 import com.example.model.StoredTurn
 import com.example.tools.HtmlSandboxManager
 import com.example.tools.MCPToolExecutor
+import com.example.tools.ToolCallResponse
 import com.example.update.UpdateManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -71,6 +78,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val speechEngineManager = SpeechEngineManager(application, downloadManager)
     private val speechRecorder = SpeechRecorder(application)
     private val speechPlayer = SpeechPlayer(application)
+
+    /**
+     * The pictures the chats generated, one folder per session. They are
+     * plain files rather than database rows so a deleted chat takes its
+     * pictures with it.
+     */
+    val generatedImageStore = GeneratedImageStore(File(application.filesDir, "generated"))
+
+    /**
+     * The image model. It is loaded only while a picture is drawn: the chat
+     * model is released first, so the two never share the memory.
+     */
+    val imageEngineManager = ImageEngineManager(application, downloadManager, generatedImageStore)
+
+    /** The image models the user can pick from. */
+    val imageModels: List<ImageModelProfile> = ImageModelProfile.MODELS
+
+    val selectedImageModel: StateFlow<ImageModelProfile> = imageEngineManager.selected
+    val downloadedImageModels: StateFlow<Set<String>> = imageEngineManager.downloaded
+    val imageState: StateFlow<ImageEngineState> = imageEngineManager.state
+    val imageError: StateFlow<String?> = imageEngineManager.error
 
     val sttEnabled: StateFlow<Boolean> = speechEngineManager.sttEnabled
     val ttsEnabled: StateFlow<Boolean> = speechEngineManager.ttsEnabled
@@ -226,6 +254,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // Check if models were already downloaded locally
         checkDownloadedModels()
         speechEngineManager.refresh()
+        imageEngineManager.refresh()
+
+        // Drawing a picture needs the chat weights out of memory first, which
+        // only this side can arrange: the engine releases its own handle, runs
+        // this hook and loads the chat model back afterwards.
+        modelEngineManager.imageGeneration = { argument, sessionId ->
+            generateImageForTool(argument, sessionId)
+        }
 
         // Keep the inactivity timer in sync with the engine: schedule it whenever
         // weights are resident, cancel it as soon as they are not.
@@ -338,6 +374,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         downloadManager.publishCancelled(modelId)
         speechEngineManager.onDownloadCancelled(modelId)
+        imageEngineManager.onDownloadCancelled(modelId)
     }
 
     /**
@@ -494,6 +531,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             speechRecorder.cancel()
             speechEngineManager.releaseEngines()
+            imageEngineManager.unload()
         }
         viewModelScope.launch {
             modelEngineManager.unloadModel()
@@ -666,6 +704,122 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Image generation
+    // ---------------------------------------------------------------------
+
+    /**
+     * Picks the model pictures are drawn with and fetches its weights when
+     * they are not on the device yet. The weights stay on disk until a picture
+     * is actually requested.
+     */
+    fun selectImageModel(model: ImageModelProfile) {
+        if (model.id == imageEngineManager.selected.value.id) return
+        imageEngineManager.clearError()
+        launchDownload(model.id) {
+            imageEngineManager.selectModel(model)
+            imageEngineManager.downloadModel(model)
+        }
+    }
+
+    /** Downloads image weights without picking them. */
+    fun downloadImageModel(model: ImageModelProfile) {
+        imageEngineManager.clearError()
+        launchDownload(model.id) {
+            imageEngineManager.downloadModel(model)
+        }
+    }
+
+    /** Removes image weights from the device. */
+    fun deleteImageModel(model: ImageModelProfile) {
+        imageEngineManager.clearError()
+        val download = downloadJobs.remove(model.id)
+        viewModelScope.launch {
+            download?.let { job ->
+                job.cancel()
+                job.join()
+            }
+            imageEngineManager.onDownloadCancelled(model.id)
+            imageEngineManager.deleteModel(model)
+        }
+    }
+
+    /** Releases the image weights without touching the chat model. */
+    fun unloadImageModel() {
+        viewModelScope.launch { imageEngineManager.unload() }
+    }
+
+    fun dismissImageError() {
+        imageEngineManager.clearError()
+    }
+
+    /** The file of a generated picture of the current chat, or null. */
+    fun generatedImageFile(id: String): File? {
+        val session = _currentSessionId.value ?: return null
+        return generatedImageStore.fileFor(session, id)
+    }
+
+    /** A `data:` URI for a generated picture, used inside the HTML sandbox. */
+    fun generatedImageDataUri(id: String): String? {
+        val session = _currentSessionId.value ?: return null
+        return generatedImageStore.dataUri(session, id)
+    }
+
+    /**
+     * Draws a picture for the `generate_image` tool.
+     *
+     * Called by [ModelEngineManager] after it released the chat weights, so the
+     * image model has the whole device. The reply teaches the model how to
+     * reference the result, because the model only ever sees the token.
+     */
+    private suspend fun generateImageForTool(argument: String, sessionId: String?): ToolCallResponse {
+        val session = sessionId ?: _currentSessionId.value
+        if (session == null) {
+            return ToolCallResponse(
+                toolName = "generate_image",
+                argument = argument,
+                result = "Error: there is no active chat to store the picture in.",
+                success = false
+            )
+        }
+
+        val model = imageEngineManager.selected.value
+        val request = ImagePromptParser.parse(argument, model.resolution, model.steps)
+        if (request.prompt.isBlank()) {
+            return ToolCallResponse(
+                toolName = "generate_image",
+                argument = argument,
+                result = "Error: the image description was empty. Call generate_image with {\"prompt\": \"...\"}.",
+                success = false
+            )
+        }
+
+        val image = imageEngineManager.generate(request, session)
+        if (image == null) {
+            return ToolCallResponse(
+                toolName = "generate_image",
+                argument = argument,
+                result = "The picture could not be generated: " +
+                    (imageEngineManager.error.value ?: "unknown error") + ".",
+                success = false
+            )
+        }
+
+        return ToolCallResponse(
+            toolName = "generate_image",
+            argument = argument,
+            result = buildString {
+                append("Picture generated with ").append(model.name).append('.')
+                append("\nDescription: ").append(request.prompt)
+                append("\nSize: ").append(request.width).append('x').append(request.height)
+                append("\nReference: ").append(image.token)
+                append("\nShow it in your reply as ![description](").append(image.token).append(')')
+                append(" or in the HTML sandbox as <img src=\"").append(image.token).append("\">.")
+            },
+            success = true
+        )
+    }
+
     /** Starts push-to-talk recording. Tapping the mic again stops it. */
     fun startListening() {
         if (!sttEnabled.value || isGenerationRunning()) return
@@ -794,6 +948,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
             htmlSandboxManager.deleteSandbox(sessionId)
+            generatedImageStore.deleteSession(sessionId)
             repository.deleteSession(sessionId)
             if (_currentSessionId.value == sessionId) {
                 clearStreamingState()
@@ -809,6 +964,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             for (s in all) {
                 htmlSandboxManager.deleteSandbox(s.id)
             }
+            generatedImageStore.deleteAll()
             repository.clearAll()
             _currentSessionId.value = null
         }

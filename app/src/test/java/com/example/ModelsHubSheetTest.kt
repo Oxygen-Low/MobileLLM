@@ -8,6 +8,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import com.example.model.ModelHubTab
+import com.example.model.ImageEngineState
+import com.example.model.ImageModelProfile
 import com.example.model.ModelLoadState
 import com.example.model.ModelProfile
 import com.example.model.SpeechEngineState
@@ -49,11 +51,23 @@ class ModelsHubSheetTest {
     fun `the tabs without models yet show a placeholder`() {
         showHub()
 
-        listOf(ModelHubTab.IMAGE, ModelHubTab.MUSIC, ModelHubTab.VIDEO).forEach { tab ->
+        listOf(ModelHubTab.MUSIC, ModelHubTab.VIDEO).forEach { tab ->
             selectTab(tab)
             composeTestRule.onNodeWithTag("hub_work_in_progress").assertIsDisplayed()
             composeTestRule.onNodeWithText("Work In Progress!").assertIsDisplayed()
         }
+    }
+
+    @Test
+    fun `the image tab holds the image models`() {
+        showHub()
+
+        selectTab(ModelHubTab.IMAGE)
+        scrollTo("image_model_${ImageModelProfile.SD_TURBO.id}")
+        composeTestRule.onNodeWithTag("image_model_${ImageModelProfile.SD_TURBO.id}").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("image_model_${ImageModelProfile.SD_V1_5.id}").assertIsDisplayed()
+        // Image generation is implemented, so the tab is not a placeholder.
+        composeTestRule.onNodeWithTag("hub_work_in_progress").assertDoesNotExist()
     }
 
     @Test
@@ -106,6 +120,11 @@ class ModelsHubSheetTest {
                 selectedTtsVoice = SpeechModelProfile.DEFAULT_TTS_VOICE,
                 downloadedTtsVoices = emptySet(),
                 previewingTtsVoiceId = null,
+                imageModels = ImageModelProfile.MODELS,
+                selectedImageModel = ImageModelProfile.DEFAULT_IMAGE_MODEL,
+                downloadedImageModels = emptySet(),
+                imageState = ImageEngineState.NOT_DOWNLOADED,
+                imageError = null,
                 onToggleStt = {},
                 onToggleTts = {},
                 onSelectTtsVoice = {},

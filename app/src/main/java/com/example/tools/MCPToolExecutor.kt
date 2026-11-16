@@ -46,6 +46,11 @@ class MCPToolExecutor(
             name = "read_html_sandbox",
             description = "Reads a numbered section of lines from the current session's HTML sandbox file to inspect existing code before editing.",
             parametersDescription = "JSON object with \"start_line\" (1-based integer) and \"limit\" (line count, default 50), e.g. {\"start_line\": 1, \"limit\": 100}"
+        ),
+        MCPTool(
+            name = "generate_image",
+            description = "Draws a picture on the device from a written description. The picture is saved with the chat and gets a reference token. Use the token to show it: in your reply as ![description](gen:ID) or in the HTML sandbox as <img src=\"gen:ID\">.",
+            parametersDescription = "JSON object with \"prompt\" (string, what to draw), and optionally \"width\", \"height\" (pixels, default 512), \"steps\" (sampling steps) and \"seed\" (integer). Example: {\"prompt\": \"a red fox in a snowy forest\"}"
         )
     )
 
@@ -82,6 +87,17 @@ class MCPToolExecutor(
                 }
                 "edit_html_sandbox" -> performEditHtmlSandbox(argument)
                 "read_html_sandbox" -> performReadHtmlSandbox(argument)
+                "generate_image" -> {
+                    // The engine intercepts this call before it reaches the
+                    // executor: drawing a picture needs the chat weights out of
+                    // memory first, which only the orchestrator can arrange.
+                    ToolCallResponse(
+                        toolName = toolName,
+                        argument = argument,
+                        result = "Image generation is not available right now.",
+                        success = false
+                    )
+                }
                 else -> {
                     ToolCallResponse(
                         toolName = toolName,
