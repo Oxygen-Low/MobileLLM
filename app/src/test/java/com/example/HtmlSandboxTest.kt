@@ -4,6 +4,7 @@ import com.example.model.ToolCallDetector
 import com.example.model.ToolCallParser
 import com.example.tools.HtmlSandboxManager
 import com.example.tools.MCPToolExecutor
+import com.example.tools.MiniJson
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -139,6 +140,56 @@ class HtmlSandboxTest {
     }
 
     @Test
+    fun `editSandbox stores a page without the fence the model wrapped it in`() {
+        val sessionId = "session-fenced"
+        manager.ensureSandboxExists(sessionId)
+
+        val html = "<!DOCTYPE html>\n<html><body><h1>Hello</h1></body></html>"
+        val (success, _) = manager.editSandbox(sessionId, "", "```html\n$html\n```")
+
+        assertTrue(success)
+        assertEquals(html, manager.getSandboxContent(sessionId))
+    }
+
+    @Test
+    fun `getSandboxContent repairs a fence saved by an older build`() {
+        val sessionId = "session-old-fence"
+        val html = "<!DOCTYPE html><html><body><p>Old</p></body></html>"
+        val file = manager.ensureSandboxExists(sessionId)
+        file.writeText("```html\n$html\n```")
+
+        assertEquals(html, manager.getSandboxContent(sessionId))
+    }
+
+    @Test
+    fun `editSandbox matches an old_string read from a repaired sandbox`() {
+        val sessionId = "session-old-fence-edit"
+        val file = manager.ensureSandboxExists(sessionId)
+        file.writeText("```html\n<!DOCTYPE html><html><body><p>Old</p></body></html>\n```")
+
+        val (success, _) = manager.editSandbox(sessionId, "<p>Old</p>", "<p>New</p>")
+
+        assertTrue(success)
+        assertEquals("<!DOCTYPE html><html><body><p>New</p></body></html>", manager.getSandboxContent(sessionId))
+        assertFalse(file.readText().contains("```"))
+    }
+
+    @Test
+    fun `edit_html_sandbox keeps the unescaped attribute quotes of the page`() {
+        val sessionId = "session-sloppy-json"
+        manager.ensureSandboxExists(sessionId)
+        executor.activeSessionId = sessionId
+
+        val page = """<!DOCTYPE html><html><body><button style="color:red">Tap</button></body></html>"""
+        val argument = "{\"old_string\": \"\", \"new_string\": \"$page\"}"
+
+        val response = runBlocking { executor.executeTool("edit_html_sandbox", argument) }
+
+        assertTrue(response.result, response.success)
+        assertEquals(page, manager.getSandboxContent(sessionId))
+    }
+
+    @Test
     fun `readSandbox on empty file informs caller`() {
         val sessionId = "session-read-empty"
         manager.ensureSandboxExists(sessionId)
@@ -232,5 +283,21 @@ class HtmlSandboxTest {
         val parsed = ToolCallParser.parse(callText, knownTools)
         assertEquals("read_html_sandbox", parsed?.toolName)
         assertTrue(parsed?.argument?.contains("\"start_line\":5") == true || parsed?.argument?.contains("\"start_line\": 5") == true)
+    }
+
+    @Test
+    fun `ToolCallParser keeps the braces of the page inside an arguments envelope`() {
+        // The braces of a script must not cut the argument short: the fragment
+        // that survives is what reaches the sandbox as an almost blank page.
+        val knownTools = setOf("edit_html_sandbox")
+        val callText = """{"name": "edit_html_sandbox", "arguments": {"old_string": "", "new_string": "<html><body><script>if (a) { b(); }</script></body></html>"}}"""
+
+        val parsed = ToolCallParser.parse(callText, knownTools)
+
+        assertEquals("edit_html_sandbox", parsed?.toolName)
+        assertEquals(
+            "<html><body><script>if (a) { b(); }</script></body></html>",
+            MiniJson.getString(parsed?.argument.orEmpty(), "new_string")
+        )
     }
 }

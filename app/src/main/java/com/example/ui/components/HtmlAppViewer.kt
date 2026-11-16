@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +69,10 @@ import com.example.ui.theme.TerminalGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
+
+/** How long a changed page waits before the preview reloads it. */
+private const val RELOAD_DELAY_MS = 400L
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -78,6 +83,19 @@ fun HtmlPreviewView(
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    // The page is loaded again when the content changes: a preview created
+    // from the first half of a streaming reply would otherwise stay on screen
+    // as an almost empty page. The reload waits for a quiet moment, because a
+    // page that is still arriving would restart its scripts on every token.
+    val loaded = remember { LoadedHtml() }
+
+    LaunchedEffect(htmlContent, webViewRef) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (loaded.value == htmlContent) return@LaunchedEffect
+        delay(RELOAD_DELAY_MS)
+        loaded.value = htmlContent
+        webView.loadSandbox(htmlContent)
+    }
 
     Box(
         modifier = modifier
@@ -98,8 +116,11 @@ fun HtmlPreviewView(
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
                     settings.allowContentAccess = true
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    
+                    // A transparent WebView draws a page that has no background
+                    // of its own over the dark card behind it, which hides the
+                    // black default text of many generated pages.
+                    setBackgroundColor(android.graphics.Color.WHITE)
+
                     webChromeClient = WebChromeClient()
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -110,13 +131,8 @@ fun HtmlPreviewView(
                             isLoading = false
                         }
                     }
-                    loadDataWithBaseURL(
-                        "https://app.local/",
-                        htmlContent,
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
+                    loadSandbox(htmlContent)
+                    loaded.value = htmlContent
                     webViewRef = this
                 }
             },
@@ -155,13 +171,7 @@ fun HtmlPreviewView(
         ) {
             IconButton(
                 onClick = {
-                    webViewRef?.loadDataWithBaseURL(
-                        "https://app.local/",
-                        htmlContent,
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
+                    webViewRef?.loadSandbox(htmlContent)
                 },
                 modifier = Modifier.size(24.dp)
             ) {
@@ -204,6 +214,17 @@ fun FullscreenHtmlAppDialog(
     if (!isOpen) return
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    val loaded = remember { LoadedHtml() }
+
+    // A page that is edited while the sandbox is open stays in front of the
+    // user until the tool finished; then it reloads with the new version.
+    LaunchedEffect(htmlContent, webViewRef) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (loaded.value == htmlContent) return@LaunchedEffect
+        delay(RELOAD_DELAY_MS)
+        loaded.value = htmlContent
+        webView.loadSandbox(htmlContent)
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -261,13 +282,7 @@ fun FullscreenHtmlAppDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
                             onClick = {
-                                webViewRef?.loadDataWithBaseURL(
-                                    "https://app.local/",
-                                    htmlContent,
-                                    "text/html",
-                                    "UTF-8",
-                                    null
-                                )
+                                webViewRef?.loadSandbox(htmlContent)
                             },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -298,33 +313,58 @@ fun FullscreenHtmlAppDialog(
                 HorizontalDivider(color = BorderSubtle)
 
                 // Sandbox WebView Container
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.useWideViewPort = true
-                            settings.loadWithOverviewMode = true
-                            settings.allowContentAccess = true
-                            webChromeClient = WebChromeClient()
-                            webViewClient = WebViewClient()
-                            loadDataWithBaseURL(
-                                "https://app.local/",
-                                htmlContent,
-                                "text/html",
-                                "UTF-8",
-                                null
-                            )
-                            webViewRef = this
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.useWideViewPort = true
+                                settings.loadWithOverviewMode = true
+                                settings.allowContentAccess = true
+                                setBackgroundColor(android.graphics.Color.WHITE)
+                                webChromeClient = WebChromeClient()
+                                webViewClient = WebViewClient()
+                                loadSandbox(htmlContent)
+                                loaded.value = htmlContent
+                                webViewRef = this
+                            }
+                        },
+                        update = { webView ->
+                            webViewRef = webView
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * What the WebView of a preview currently shows, kept outside of Compose
+ * state because a reload is a side effect of the content changing, not
+ * something the screen has to recompose for.
+ */
+private class LoadedHtml {
+    var value: String? = null
+}
+
+/** Loads [html] as the local page of the sandbox. */
+private fun WebView.loadSandbox(html: String) {
+    loadDataWithBaseURL(
+        "https://app.local/",
+        html,
+        "text/html",
+        "UTF-8",
+        null
+    )
 }

@@ -55,12 +55,13 @@ class HtmlSandboxManager(
     }
 
     /**
-     * Returns the full raw HTML content of the sandbox for [sessionId], or empty string if none.
+     * Returns the full HTML content of the sandbox for [sessionId], or empty
+     * string if none.
      */
     fun getSandboxContent(sessionId: String): String {
         val file = getSandboxFile(sessionId)
         if (!file.exists()) return ""
-        return runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("")
+        return readNormalized(file)
     }
 
     /**
@@ -85,7 +86,7 @@ class HtmlSandboxManager(
             return false to "HTML sandbox file does not exist for session $sessionId."
         }
 
-        val content = file.readText(Charsets.UTF_8)
+        val content = readNormalized(file)
         if (content.isEmpty()) {
             return true to "HTML sandbox is empty (0 bytes). Use edit_html_sandbox with empty old_string to initialize it."
         }
@@ -130,16 +131,19 @@ class HtmlSandboxManager(
      */
     fun editSandbox(sessionId: String, oldString: String, newString: String): Pair<Boolean, String> {
         val file = ensureSandboxExists(sessionId)
-        val currentContent = file.readText(Charsets.UTF_8)
+        val currentContent = readNormalized(file)
 
         if (currentContent.isEmpty()) {
             if (oldString.isNotEmpty()) {
                 return false to "Failed to edit HTML sandbox: the file is currently empty (0 bytes). Use an empty old_string (\"\") to write the initial HTML code."
             }
             return try {
-                file.writeText(newString, Charsets.UTF_8)
-                val lineCount = newString.lines().size
-                true to "Successfully initialized HTML sandbox ($lineCount lines, ${newString.length} chars written)."
+                // The page is stored cleaned, so a model that wraps its code
+                // in a fence does not leave the fence in the sandbox.
+                val content = HtmlDocument.normalize(newString)
+                file.writeText(content, Charsets.UTF_8)
+                val lineCount = content.lines().size
+                true to "Successfully initialized HTML sandbox ($lineCount lines, ${content.length} chars written)."
             } catch (e: IOException) {
                 false to "I/O error writing to HTML sandbox: ${e.message}"
             }
@@ -159,7 +163,7 @@ class HtmlSandboxManager(
             return false to "Failed to edit HTML sandbox: old_string was found $occurrences times. The target string must be unique within the file. Include more surrounding lines in old_string to make it unique."
         }
 
-        val updatedContent = currentContent.replace(oldString, newString)
+        val updatedContent = HtmlDocument.normalize(currentContent.replace(oldString, newString))
         return try {
             file.writeText(updatedContent, Charsets.UTF_8)
             val lineCount = updatedContent.lines().size
@@ -168,6 +172,14 @@ class HtmlSandboxManager(
             false to "I/O error writing to HTML sandbox: ${e.message}"
         }
     }
+
+    /**
+     * Reads [file] the way the sandbox should present it. Every read goes
+     * through here, so a sandbox that an older build saved with a fence or an
+     * escaped page is repaired the next time it is opened or edited.
+     */
+    private fun readNormalized(file: File): String =
+        runCatching { HtmlDocument.normalize(file.readText(Charsets.UTF_8)) }.getOrDefault("")
 
     private fun countOccurrences(text: String, target: String): Int {
         if (target.isEmpty()) return 0
