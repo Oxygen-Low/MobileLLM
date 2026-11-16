@@ -452,6 +452,37 @@ class ModelDownloadManager(
         return if (file.isFile) file.length() else 0L
     }
 
+    /**
+     * Publishes the state a cancelled transfer leaves behind.
+     *
+     * Cancelling the coroutine is enough to stop the transfer, but the UI has
+     * to be told right away as well: the cancellation can land between two
+     * progress reports, so the last one would otherwise keep claiming that the
+     * download is still running. The partial file stays on disk so the next
+     * attempt resumes from it.
+     */
+    fun publishCancelled(modelId: String) {
+        val part = File(modelsDir, "$modelId.gguf.part")
+        val speechPart = File(speechDir, "$modelId.tar.bz2.part")
+        val file = if (part.isFile) part else speechPart
+        val expectedBytes = _downloadStates.value[modelId]
+            ?.totalMb
+            ?.times(1024f * 1024f)
+            ?: 0f
+        publish(
+            modelId = modelId,
+            progress = if (expectedBytes > 0f) {
+                (file.length() / expectedBytes).coerceIn(0f, 1f)
+            } else {
+                0f
+            },
+            downloadedBytes = file.length().toFloat(),
+            totalBytes = expectedBytes,
+            speedMbps = 0f,
+            state = ModelDownloadState.NOT_DOWNLOADED
+        )
+    }
+
     private fun progressOf(part: File, expectedBytes: Long): Float {
         if (expectedBytes <= 0) return 0f
         return (part.length().toDouble() / expectedBytes).toFloat().coerceIn(0f, 1f)

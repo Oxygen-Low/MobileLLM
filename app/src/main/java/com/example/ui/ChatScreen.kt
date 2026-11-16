@@ -550,7 +550,8 @@ fun ChatScreen(
         onUnloadModel = { viewModel.unloadModel() },
         onDownloadModel = { viewModel.downloadModel(it) },
         onReinstallModel = { viewModel.reinstallModel(it) },
-        onDeleteModel = { viewModel.deleteDownloadedModel(it) }
+        onDeleteModel = { viewModel.deleteDownloadedModel(it) },
+        onCancelDownload = { viewModel.cancelDownload(it) }
     )
 
     // Chat History Drawer Modal

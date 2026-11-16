@@ -266,6 +266,22 @@ class SpeechEngineManager(
     }
 
     /**
+     * Brings the engine state back from "downloading" after the user stopped
+     * the transfer. The weights are missing, so the state goes back to what is
+     * on disk instead of pretending the download is still running.
+     */
+    fun onDownloadCancelled(modelId: String) {
+        if (modelId == sttModel.id && _sttState.value == SpeechEngineState.DOWNLOADING) {
+            _sttState.value = stateFromDisk(_sttEnabled.value, sttModel)
+        }
+        val voice = _ttsVoice.value
+        if (modelId == voice.id && _ttsState.value == SpeechEngineState.DOWNLOADING) {
+            _ttsState.value = stateFromDisk(_ttsEnabled.value, voice)
+        }
+        refreshDownloadedVoices()
+    }
+
+    /**
      * Loads the STT model if it is not resident yet, downloading it first when
      * necessary. Safe to call from the mic button: a no-op while disabled.
      */

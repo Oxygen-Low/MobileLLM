@@ -11,6 +11,7 @@ import com.example.data.ChatMessageEntity
 import com.example.data.ChatRepository
 import com.example.data.ChatSessionEntity
 import com.example.data.ChatTranscript
+import com.example.data.ModelPreferences
 import com.example.model.AgentStep
 import com.example.model.AgentTranscript
 import com.example.model.DownloadProgressInfo
@@ -118,8 +119,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val updateState = updateManager.state
     val changelogState = changelogManager.state
 
+    private val modelPreferences = ModelPreferences(application)
+
     val availableModels = MutableStateFlow(ModelProfile.DEFAULT_MODELS)
-    val selectedModel = MutableStateFlow(ModelProfile.QWEN3_0_6B)
+
+    /**
+     * The model that is selected (and normally loaded) right now.
+     *
+     * It starts from the model the user loaded the last time the app ran, so a
+     * restart brings the same model back instead of always picking the default
+     * one. The id is only a hint - [checkDownloadedModels] falls back to another
+     * downloaded model when the remembered one is gone.
+     */
+    val selectedModel = MutableStateFlow(
+        ModelProfile.DEFAULT_MODELS.firstOrNull { it.id == modelPreferences.selectedModelId }
+            ?: ModelProfile.QWEN3_0_6B
+    )
 
     val downloadStates: StateFlow<Map<String, DownloadProgressInfo>> = downloadManager.downloadStates
 
@@ -193,6 +208,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var generationJob: Job? = null
     private var inactivityJob: Job? = null
     private var updateCheckJob: Job? = null
+
+    /**
+     * The transfers that are running right now, keyed by model id.
+     *
+     * Every download goes through [launchDownload], so the button that started
+     * it can cancel it again and the transfer is never left half-running in
+     * the background.
+     */
+    private val downloadJobs = mutableMapOf<String, Job>()
     private var lastActivityResetMs = 0L
 
     /** Timestamp of the last stored message; see [nextTimestamp]. */
@@ -242,9 +266,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         availableModels.value = updated
 
-        // Auto-load if the selected model is downloaded
-        val current = updated.firstOrNull { it.id == selectedModel.value.id } ?: updated[0]
+        // Auto-load the model that was used last when it is still on the
+        // device. If it was deleted, another downloaded model takes over so
+        // the app still starts with something usable.
+        val remembered = updated.firstOrNull { it.id == selectedModel.value.id }
+        val current = remembered?.takeIf { it.isReadyToLoad }
+            ?: updated.firstOrNull { it.isReadyToLoad }
+            ?: remembered
+            ?: updated.first()
         selectedModel.value = current
+        modelPreferences.selectedModelId = current.id
         if (current.isReadyToLoad) {
             loadModel(current)
         }
@@ -253,7 +284,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun downloadModel(model: ModelProfile) {
         if (model.modelScopeRepo == null || model.modelScopeFile == null) return
 
-        viewModelScope.launch {
+        launchDownload(model.id) {
             downloadManager.startDownload(
                 modelId = model.id,
                 repo = model.modelScopeRepo,
@@ -286,15 +317,62 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteDownloadedModel(modelId: String) {
-        downloadManager.deleteModel(modelId)
-        val updated = availableModels.value.map {
-            if (it.id == modelId) it.copy(downloadState = ModelDownloadState.NOT_DOWNLOADED, downloadProgress = 0f)
-            else it
+    /**
+     * Stops the transfer of [modelId].
+     *
+     * The partial file is kept, so a later attempt resumes instead of starting
+     * the whole download over. The state is reset to "not downloaded" so the
+     * card shows its download button again.
+     */
+    fun cancelDownload(modelId: String) {
+        downloadJobs.remove(modelId)?.cancel()
+        if (modelId == speechEngineManager.sttModel.id) {
+            // Dictation may be waiting for the very same weights; it must not
+            // start the transfer again behind the user's back.
+            dictationJob?.cancel()
+            dictationJob = null
+            viewModelScope.launch { speechRecorder.cancel() }
         }
-        availableModels.value = updated
-        if (selectedModel.value.id == modelId) {
-            viewModelScope.launch {
+        if (modelId == speechEngineManager.ttsVoice.value.id) {
+            stopSpeaking()
+        }
+        downloadManager.publishCancelled(modelId)
+        speechEngineManager.onDownloadCancelled(modelId)
+    }
+
+    /**
+     * Runs [block] as the download of [modelId].
+     *
+     * A download that is already running for the same model is cancelled
+     * first, and the map forgets the job as soon as it is finished so
+     * [cancelDownload] only ever touches a live transfer.
+     */
+    private fun launchDownload(modelId: String, block: suspend () -> Unit) {
+        downloadJobs.remove(modelId)?.cancel()
+        val job = viewModelScope.launch { block() }
+        downloadJobs[modelId] = job
+        job.invokeOnCompletion {
+            if (downloadJobs[modelId] === job) {
+                downloadJobs.remove(modelId)
+            }
+        }
+    }
+
+    fun deleteDownloadedModel(modelId: String) {
+        viewModelScope.launch {
+            // Stop a running transfer before its files are removed; otherwise
+            // it keeps writing the .part file that is being deleted.
+            downloadJobs.remove(modelId)?.let { job ->
+                job.cancel()
+                job.join()
+            }
+            downloadManager.deleteModel(modelId)
+            val updated = availableModels.value.map {
+                if (it.id == modelId) it.copy(downloadState = ModelDownloadState.NOT_DOWNLOADED, downloadProgress = 0f)
+                else it
+            }
+            availableModels.value = updated
+            if (selectedModel.value.id == modelId) {
                 modelEngineManager.unloadModel()
                 selectedModel.value = selectedModel.value.copy(downloadState = ModelDownloadState.NOT_DOWNLOADED)
             }
@@ -305,6 +383,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (model.modelScopeRepo == null || model.modelScopeFile == null) return
 
         viewModelScope.launch {
+            // The weights are about to be replaced, so a transfer that is
+            // still running has to stop and release its .part file first.
+            downloadJobs.remove(model.id)?.let { job ->
+                job.cancel()
+                job.join()
+            }
             // Unload the weights first so the file is not in use while it is replaced.
             if (selectedModel.value.id == model.id) {
                 modelEngineManager.unloadModel()
@@ -325,6 +409,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadModel(model: ModelProfile) {
         selectedModel.value = model
+        // The model that is loaded now is the one the next launch has to bring
+        // back, so remember it before the weights are touched.
+        modelPreferences.selectedModelId = model.id
         viewModelScope.launch {
             val file = downloadManager.getModelFile(model.id)
             modelEngineManager.loadModel(model, file)
@@ -466,25 +553,44 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSpeechToTextEnabled(enabled: Boolean) {
         _speechError.value = null
-        viewModelScope.launch {
-            if (!enabled) {
-                // A toggle turned off mid-dictation must not leave the
-                // microphone recording in the background.
-                dictationJob?.cancel()
-                dictationJob = null
-                speechRecorder.cancel()
-            }
+        val sttId = speechEngineManager.sttModel.id
+        if (!enabled) {
+            // A toggle turned off mid-dictation must not leave the microphone
+            // recording in the background, and it must not leave the transfer
+            // running either.
+            dictationJob?.cancel()
+            dictationJob = null
+            viewModelScope.launch { speechRecorder.cancel() }
+            downloadJobs.remove(sttId)?.cancel()
+            speechEngineManager.onDownloadCancelled(sttId)
+        }
+        val sttAction = suspend {
             speechEngineManager.setSttEnabled(enabled)
             scheduleInactivityUnload()
+        }
+        if (enabled) {
+            launchDownload(sttId, sttAction)
+        } else {
+            viewModelScope.launch { sttAction() }
         }
     }
 
     fun setTextToSpeechEnabled(enabled: Boolean) {
         _speechError.value = null
-        if (!enabled) stopSpeaking()
-        viewModelScope.launch {
+        if (!enabled) {
+            stopSpeaking()
+            val voiceId = speechEngineManager.ttsVoice.value.id
+            downloadJobs.remove(voiceId)?.cancel()
+            speechEngineManager.onDownloadCancelled(voiceId)
+        }
+        val action = suspend {
             speechEngineManager.setTtsEnabled(enabled)
             scheduleInactivityUnload()
+        }
+        if (enabled) {
+            launchDownload(speechEngineManager.ttsVoice.value.id, action)
+        } else {
+            viewModelScope.launch { action() }
         }
     }
 
@@ -495,7 +601,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun selectTtsVoice(voice: SpeechModelProfile) {
         _speechError.value = null
         stopSpeaking()
-        viewModelScope.launch {
+        // A transfer for the voice that is being replaced is no longer needed.
+        downloadJobs.remove(speechEngineManager.ttsVoice.value.id)?.cancel()
+        launchDownload(voice.id) {
             speechEngineManager.selectTtsVoice(voice)
             scheduleInactivityUnload()
         }
@@ -504,7 +612,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** Downloads a voice without switching to it, so it can be previewed. */
     fun downloadTtsVoice(voice: SpeechModelProfile) {
         _speechError.value = null
-        viewModelScope.launch {
+        launchDownload(voice.id) {
             speechEngineManager.downloadVoice(voice)
         }
     }
@@ -518,7 +626,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteTtsVoice(voice: SpeechModelProfile) {
         _speechError.value = null
         stopSpeaking()
+        // Deleting a voice while its archive is still arriving would race the
+        // downloader for the same directory.
+        val download = downloadJobs.remove(voice.id)
         viewModelScope.launch {
+            download?.let { job ->
+                job.cancel()
+                job.join()
+            }
+            speechEngineManager.onDownloadCancelled(voice.id)
             speechEngineManager.deleteVoice(voice)
             scheduleInactivityUnload()
         }
@@ -569,7 +685,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         // The model may have been released by the idle timer. Load it while
         // the user is speaking so a short clip is transcribed without delay.
-        viewModelScope.launch { speechEngineManager.ensureSttReady() }
+        launchDownload(speechEngineManager.sttModel.id) {
+            speechEngineManager.ensureSttReady()
+        }
     }
 
     fun stopListening() {

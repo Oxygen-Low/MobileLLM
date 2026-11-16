@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
@@ -68,6 +69,7 @@ fun TtsVoiceList(
     onDownloadVoice: (SpeechModelProfile) -> Unit,
     onPreviewVoice: (SpeechModelProfile) -> Unit,
     onDeleteVoice: (SpeechModelProfile) -> Unit,
+    onCancelDownload: (SpeechModelProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -86,7 +88,8 @@ fun TtsVoiceList(
                 onSelect = { onSelectVoice(voice) },
                 onDownload = { onDownloadVoice(voice) },
                 onPreview = { onPreviewVoice(voice) },
-                onDelete = { onDeleteVoice(voice) }
+                onDelete = { onDeleteVoice(voice) },
+                onCancel = { onCancelDownload(voice) }
             )
         }
     }
@@ -102,7 +105,8 @@ private fun TtsVoiceRow(
     onSelect: () -> Unit,
     onDownload: () -> Unit,
     onPreview: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onCancel: () -> Unit
 ) {
     val isDownloading = downloadInfo?.state == ModelDownloadState.DOWNLOADING
 
@@ -189,11 +193,17 @@ private fun TtsVoiceRow(
         Spacer(modifier = Modifier.width(4.dp))
 
         if (isDownloading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-                color = TelemetryCyan
-            )
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier.testTag("tts_cancel_${voice.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cancel downloading ${voice.name}",
+                    tint = ErrorRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         } else if (isDownloaded) {
             IconButton(
                 onClick = onDelete,

@@ -65,8 +65,11 @@ class ModelsHubSheetTest {
         composeTestRule.onNodeWithTag("speech_card_${SpeechModelProfile.WHISPER_TINY.id}").assertIsDisplayed()
 
         selectTab(ModelHubTab.TTS)
-        scrollTo("tts_voice_picker_toggle")
-        composeTestRule.onNodeWithTag("tts_voice_picker_toggle").assertIsDisplayed()
+        scrollTo("tts_voice_list")
+        composeTestRule.onNodeWithTag("tts_voice_list").assertIsDisplayed()
+        // The voices are part of the tab itself now: no toggle is needed to
+        // see them.
+        composeTestRule.onNodeWithTag("tts_voice_picker_toggle").assertDoesNotExist()
     }
 
     /** Picks a tab of the hub, scrolling the tab row to it first. */
@@ -113,7 +116,8 @@ class ModelsHubSheetTest {
                 onUnloadModel = {},
                 onDownloadModel = {},
                 onReinstallModel = {},
-                onDeleteModel = {}
+                onDeleteModel = {},
+                onCancelDownload = {}
             )
         }
     }

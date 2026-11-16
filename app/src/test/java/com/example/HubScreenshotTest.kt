@@ -59,7 +59,8 @@ class HubScreenshotTest {
                 onUnloadModel = {},
                 onDownloadModel = {},
                 onReinstallModel = {},
-                onDeleteModel = {}
+                onDeleteModel = {},
+                onCancelDownload = {}
             )
         }
 

@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -107,6 +104,7 @@ fun ModelsHubSheet(
     onDownloadModel: (ModelProfile) -> Unit,
     onReinstallModel: (ModelProfile) -> Unit,
     onDeleteModel: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (!isOpen) return
@@ -115,10 +113,6 @@ fun ModelsHubSheet(
 
     // The hub holds every kind of model, so each kind gets its own tab.
     var selectedTab by remember { mutableStateOf(ModelHubTab.TEXT) }
-
-    // The voice list is long, so it stays folded away until the user asks
-    // for it.
-    var voicePickerExpanded by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -237,7 +231,8 @@ fun ModelsHubSheet(
                                 onUnload = onUnloadModel,
                                 onDownload = { onDownloadModel(model) },
                                 onReinstall = { onReinstallModel(model) },
-                                onDelete = { onDeleteModel(model.id) }
+                                onDelete = { onDeleteModel(model.id) },
+                                onCancelDownload = { onCancelDownload(model.id) }
                             )
                         }
                     }
@@ -256,7 +251,10 @@ fun ModelsHubSheet(
                                 state = sttState,
                                 error = sttError,
                                 downloadInfo = downloadStates[SpeechModelProfile.WHISPER_TINY.id],
-                                onToggle = onToggleStt
+                                onToggle = onToggleStt,
+                                onCancelDownload = {
+                                    onCancelDownload(SpeechModelProfile.WHISPER_TINY.id)
+                                }
                             )
                         }
                     }
@@ -276,6 +274,9 @@ fun ModelsHubSheet(
                                 error = ttsError,
                                 downloadInfo = downloadStates[selectedTtsVoice.id],
                                 onToggle = onToggleTts,
+                                onCancelDownload = {
+                                    onCancelDownload(selectedTtsVoice.id)
+                                },
                                 trailing = {
                                     IconButton(
                                         onClick = { onPreviewTtsVoice(selectedTtsVoice) },
@@ -304,64 +305,33 @@ fun ModelsHubSheet(
 
                         item(key = "speech_tts_voices") {
                             Column {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { voicePickerExpanded = !voicePickerExpanded }
-                                        .testTag("tts_voice_picker_toggle"),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "VOICES",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            letterSpacing = 1.sp
-                                        ),
-                                        color = TextMuted
-                                    )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = selectedTtsVoice.name,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 10.5.sp,
-                                                color = TelemetryCyan
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Icon(
-                                            imageVector = if (voicePickerExpanded) {
-                                                Icons.Default.ExpandLess
-                                            } else {
-                                                Icons.Default.ExpandMore
-                                            },
-                                            contentDescription = if (voicePickerExpanded) {
-                                                "Hide the voices"
-                                            } else {
-                                                "Show the voices"
-                                            },
-                                            tint = TextMuted,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
+                                // Every voice of the catalogue is listed right
+                                // away - the tab exists to pick a voice, so
+                                // hiding the list behind a toggle only made the
+                                // user tap once more for it.
+                                Text(
+                                    text = "VOICES",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        letterSpacing = 1.sp
+                                    ),
+                                    color = TextMuted,
+                                    modifier = Modifier.testTag("tts_voices_header")
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                if (voicePickerExpanded) {
-                                    TtsVoiceList(
-                                        voices = ttsVoices,
-                                        selectedVoice = selectedTtsVoice,
-                                        downloadedVoices = downloadedTtsVoices,
-                                        downloadStates = downloadStates,
-                                        previewingVoiceId = previewingTtsVoiceId,
-                                        onSelectVoice = onSelectTtsVoice,
-                                        onDownloadVoice = onDownloadTtsVoice,
-                                        onPreviewVoice = onPreviewTtsVoice,
-                                        onDeleteVoice = onDeleteTtsVoice
-                                    )
-                                }
+                                TtsVoiceList(
+                                    voices = ttsVoices,
+                                    selectedVoice = selectedTtsVoice,
+                                    downloadedVoices = downloadedTtsVoices,
+                                    downloadStates = downloadStates,
+                                    previewingVoiceId = previewingTtsVoiceId,
+                                    onSelectVoice = onSelectTtsVoice,
+                                    onDownloadVoice = onDownloadTtsVoice,
+                                    onPreviewVoice = onPreviewTtsVoice,
+                                    onDeleteVoice = onDeleteTtsVoice,
+                                    onCancelDownload = { voice -> onCancelDownload(voice.id) }
+                                )
                             }
                         }
                     }
@@ -407,6 +377,7 @@ private fun SpeechFeatureCard(
     error: String?,
     downloadInfo: DownloadProgressInfo?,
     onToggle: (Boolean) -> Unit,
+    onCancelDownload: () -> Unit,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val activeDownload = downloadInfo?.takeIf { it.state == ModelDownloadState.DOWNLOADING }
@@ -539,6 +510,22 @@ private fun SpeechFeatureCard(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onCancelDownload,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                    modifier = Modifier.testTag("cancel_speech_${model.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        tint = ErrorRed,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cancel Download", color = ErrorRed, fontSize = 12.sp)
+                }
             }
 
             val message = error ?: downloadInfo
@@ -573,7 +560,8 @@ private fun ModelCard(
     onUnload: () -> Unit,
     onDownload: () -> Unit,
     onReinstall: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onCancelDownload: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -806,13 +794,19 @@ private fun ModelCard(
                     }
                 } else if (isDownloading) {
                     OutlinedButton(
-                        onClick = {},
-                        enabled = false,
-                        shape = RoundedCornerShape(8.dp)
+                        onClick = onCancelDownload,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                        modifier = Modifier.testTag("cancel_download_${model.id}")
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = TelemetryCyan)
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = ErrorRed,
+                            modifier = Modifier.size(16.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Downloading Weights…", fontSize = 12.sp)
+                        Text("Cancel Download", color = ErrorRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 } else {
                     Button(

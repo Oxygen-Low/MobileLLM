@@ -102,9 +102,9 @@ data class ModelProfile(
          * Liquid AI's LFM2.5-1.2B-Thinking, the reasoning model of the family.
          *
          * The checkpoint mixes convolution and attention layers, so it needs
-         * little memory and decodes fast on a phone. Q4_K_M is the smallest
+         * little memory and decodes fast on a phone. Q6_K is the smallest
          * quantisation that keeps the quality of the 1.2B weights intact: the
-         * file is 697 MB and most of the context lives in the cheap
+         * file is 918 MB and most of the context lives in the cheap
          * convolution state instead of the KV cache.
          *
          * Unlike the plain instruction tuned checkpoints it was trained with
@@ -116,15 +116,15 @@ data class ModelProfile(
             name = "LFM2.5-1.2B-Thinking",
             shortName = "LFM2.5",
             format = ModelFormat.GGUF,
-            quantization = "Q4_K_M",
+            quantization = "Q6_K",
             parameters = "1.2B",
             contextLength = 32768,
-            memoryMb = 1100,
-            downloadSizeMb = 697,
+            memoryMb = 1350,
+            downloadSizeMb = 918,
             modelScopeRepo = "LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
-            modelScopeFile = "LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+            modelScopeFile = "LFM2.5-1.2B-Thinking-Q6_K.gguf",
             hfRepo = "LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
-            hfFile = "LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+            hfFile = "LFM2.5-1.2B-Thinking-Q6_K.gguf",
             modelScopeUrl = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
             description = "Liquid AI's LFM2.5-1.2B-Thinking, a hybrid convolution and attention model that reasons before it answers.",
             supportsReasoning = true,
