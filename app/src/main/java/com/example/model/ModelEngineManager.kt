@@ -1,6 +1,9 @@
 ﻿package com.example.model
 
 import android.util.Log
+import com.example.horde.HordeChatEvent
+import com.example.horde.HordeClient
+import com.example.horde.HordeSseParser
 import com.example.model.internal.LlamaBridge
 import com.example.tools.MCPToolExecutor
 import com.example.tools.ToolCallResponse
@@ -81,7 +84,8 @@ sealed class GenerationEvent {
  * can involve several search → reason → act cycles before the final answer.
  */
 class ModelEngineManager(
-    private val mcpToolExecutor: MCPToolExecutor
+    private val mcpToolExecutor: MCPToolExecutor,
+    private val hordeClient: HordeClient? = null
 ) {
     private var handle: Long = 0L
     private var currentModelFile: File? = null
@@ -131,9 +135,19 @@ class ModelEngineManager(
             }
 
             releaseEngine()
-            _loadState.value = ModelLoadState.LOADING
             _lastError.value = null
 
+            // A Horde model has no weights to map: it is ready as soon as it is
+            // selected. Keep it in the same state flow so the UI and the prompt
+            // flow do not need a second set of checks.
+            if (profile.isHorde) {
+                _currentModel.value = profile
+                _allocatedMemoryMb.value = 0
+                _loadState.value = ModelLoadState.LOADED
+                return@withLock
+            }
+
+            _loadState.value = ModelLoadState.LOADING
             try {
                 LlamaBridge.nativeBackendInit()
 
@@ -206,6 +220,18 @@ class ModelEngineManager(
         enableThinking: Boolean = true,
         reasoningLevel: ReasoningLevel =
             if (enableThinking) ReasoningLevel.DEFAULT else ReasoningLevel.NONE
+    ): Flow<GenerationEvent> = if (_currentModel.value?.isHorde == true) {
+        generateHordeStream(prompt, systemDate, history, enableThinking, reasoningLevel)
+    } else {
+        generateLocalStream(prompt, systemDate, history, enableThinking, reasoningLevel)
+    }
+
+    private fun generateLocalStream(
+        prompt: String,
+        systemDate: String,
+        history: List<PromptFormat.Turn>,
+        enableThinking: Boolean,
+        reasoningLevel: ReasoningLevel
     ): Flow<GenerationEvent> = callbackFlow {
         val activeHandle = handle
         val model = _currentModel.value
@@ -308,6 +334,46 @@ class ModelEngineManager(
                     )
                 }
 
+                // A final answer that stops mid-sentence gets one extra pass:
+                // the partial text is put back into the conversation and the
+                // model is asked to continue from exactly that point.
+                if (finalContent.isNotEmpty() && OutputContinuation.looksCutOff(finalContent)) {
+                    val partial = finalContent
+                    conversation.add(PromptFormat.Turn("assistant", partial))
+                    conversation.add(PromptFormat.Turn("user", OutputContinuation.CONTINUE_INSTRUCTION))
+                    val system = buildSystemPrompt(model.name, systemDate)
+                    val renderedPrompt = PromptFormat.render(
+                        style = model.promptStyle,
+                        system = system,
+                        turns = conversation,
+                        enableThinking = false,
+                        today = templateDate(),
+                        reasoningLevel = ReasoningLevel.NONE
+                    )
+                    val roundHandle = handle
+                    if (roundHandle != 0L && _loadState.value == ModelLoadState.LOADED && isActive) {
+                        val tail = generateRound(
+                            scope = this,
+                            handle = roundHandle,
+                            system = system,
+                            renderedPrompt = renderedPrompt,
+                            enableThinking = false,
+                            reasoningLevel = ReasoningLevel.NONE
+                        ) { event -> trySend(event) }
+                        totalTokens += tail.tokens
+                        totalDurationMs += tail.durationMs
+                        if (tail.displayContent.isNotBlank()) {
+                            val merged = OutputContinuation.merge(partial, tail.displayContent)
+                            val added = OutputContinuation.appended(partial, merged)
+                            if (added.isNotEmpty()) trySend(GenerationEvent.ContentToken(added))
+                            finalContent = merged
+                            if (tail.displayThinking.isNotBlank()) {
+                                finalThinking += "\n" + tail.displayThinking
+                            }
+                        }
+                    }
+                }
+
                 val averageTps = if (totalDurationMs > 0) {
                     totalTokens * 1000.0 / totalDurationMs
                 } else {
@@ -345,6 +411,255 @@ class ModelEngineManager(
     }
 
     /**
+     * Runs a Horde chat turn. The conversation, tool loop and streamed events
+     * are the same as for a local model; only the source of the tokens differs.
+     */
+    private fun generateHordeStream(
+        prompt: String,
+        systemDate: String,
+        history: List<PromptFormat.Turn>,
+        enableThinking: Boolean,
+        reasoningLevel: ReasoningLevel
+    ): Flow<GenerationEvent> = callbackFlow {
+        val model = _currentModel.value
+        val client = hordeClient
+        if (model == null || !model.isHorde || client == null) {
+            trySend(GenerationEvent.Error("AI Horde is not configured. Pick a Horde model first."))
+            close()
+            return@callbackFlow
+        }
+
+        val worker = launch(Dispatchers.IO) {
+            try {
+                val conversation = history.toMutableList()
+                conversation.add(PromptFormat.Turn("user", prompt))
+                val system = buildSystemPrompt(model.name, systemDate)
+
+                var tokens = 0
+                var totalDurationMs = 0L
+                var finalThinking = ""
+                var finalContent = ""
+                var lastToolResult: String? = null
+                var rounds = 0
+
+                while (rounds < MAX_TOOL_ROUNDS && isActive) {
+                    rounds++
+                    val result = runHordeRound(
+                        client = client,
+                        model = model,
+                        system = system,
+                        turns = conversation
+                    ) { event -> trySend(event) }
+
+                    tokens += result.tokens
+                    totalDurationMs += result.durationMs
+                    if (result.cancelled) return@launch
+
+                    val call = result.toolCall
+                    if (call == null) {
+                        finalThinking = result.displayThinking
+                        finalContent = result.displayContent
+
+                        // A token-budget stop is the clearest sign of a cut-off
+                        // answer; the text heuristic catches workers that report
+                        // a stop even though they ran out of room.
+                        if ((result.finishReason == "length" ||
+                                OutputContinuation.looksCutOff(finalContent)) &&
+                            result.displayContent.isNotEmpty()
+                        ) {
+                            val partial = finalContent
+                            conversation.add(PromptFormat.Turn("assistant", partial))
+                            conversation.add(
+                                PromptFormat.Turn("user", OutputContinuation.CONTINUE_INSTRUCTION)
+                            )
+                            val tail = runHordeRound(
+                                client = client,
+                                model = model,
+                                system = system,
+                                turns = conversation
+                            ) { event -> trySend(event) }
+                            tokens += tail.tokens
+                            totalDurationMs += tail.durationMs
+                            if (tail.displayContent.isNotBlank()) {
+                                val merged = OutputContinuation.merge(partial, tail.displayContent)
+                                val added = OutputContinuation.appended(partial, merged)
+                                if (added.isNotEmpty()) trySend(GenerationEvent.ContentToken(added))
+                                finalContent = merged
+                                if (tail.displayThinking.isNotBlank()) {
+                                    finalThinking += "\n" + tail.displayThinking
+                                }
+                            }
+                        }
+                        break
+                    }
+
+                    trySend(
+                        GenerationEvent.ToolExecuting(
+                            toolName = call.first,
+                            argument = call.second,
+                            reasoning = result.displayThinking,
+                            preamble = result.displayContent
+                        )
+                    )
+                    val response = executeToolCall(call.first, call.second)
+                    lastToolResult = response.result
+                    trySend(
+                        GenerationEvent.ToolResult(
+                            toolName = response.toolName,
+                            argument = response.argument,
+                            result = response.result.take(MAX_TOOL_RESULT_CHARS),
+                            sourceUrl = response.sourceUrl
+                        )
+                    )
+                    conversation.add(PromptFormat.Turn("assistant", result.content))
+                    conversation.add(PromptFormat.Turn("tool", formatToolResult(response)))
+                }
+
+                val averageTps = if (totalDurationMs > 0) {
+                    tokens * 1000.0 / totalDurationMs
+                } else 0.0
+                _currentTps.value = averageTps
+                trySend(
+                    GenerationEvent.Complete(
+                        totalTokens = tokens,
+                        averageTps = averageTps,
+                        thinkingContent = finalThinking.trim(),
+                        content = finalContent.ifEmpty { lastToolResult.orEmpty() }.trim(),
+                        durationMs = totalDurationMs
+                    )
+                )
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.e(TAG, "Horde generation failed", t)
+                trySend(GenerationEvent.Error(t.message ?: "AI Horde generation failed"))
+            } finally {
+                close()
+            }
+        }
+
+        awaitClose { worker.cancel() }
+    }
+
+    /** Streams one Horde completion and splits it into thinking and answer. */
+    private suspend fun runHordeRound(
+        client: HordeClient,
+        model: ModelProfile,
+        system: String,
+        turns: List<PromptFormat.Turn>,
+        emit: (GenerationEvent) -> Unit
+    ): GenerationRound {
+        val detector = ToolCallDetector(mcpToolExecutor.availableTools.map { it.name }.toSet())
+        val splitter = ThinkStreamSplitter()
+        val thinking = StringBuilder()
+        val content = StringBuilder()
+        val rawContent = StringBuilder()
+        var tokens = 0
+        var finishReason: String? = null
+        val startedNs = System.nanoTime()
+        var lastTelemetryNs = 0L
+
+        client.streamChat(
+            model = model.remoteModelId ?: model.name,
+            messages = buildHordeMessages(system, turns),
+            maxTokens = HORDE_MAX_TOKENS,
+            temperature = TEMPERATURE.toDouble()
+        ).collect { event ->
+            when (event) {
+                is HordeChatEvent.Reasoning -> {
+                    thinking.append(event.text)
+                    emit(GenerationEvent.ThinkingToken(event.text))
+                }
+                is HordeChatEvent.Content -> {
+                    rawContent.append(event.text)
+                    val display = detector.feed(event.text)
+                    if (display.isNotEmpty()) {
+                        for (chunk in splitter.feed(display)) {
+                            if (chunk.thinking) {
+                                thinking.append(chunk.text)
+                                emit(GenerationEvent.ThinkingToken(chunk.text))
+                            } else {
+                                content.append(chunk.text)
+                                emit(GenerationEvent.ContentToken(chunk.text))
+                            }
+                        }
+                    }
+                    tokens++
+                }
+                is HordeChatEvent.Finish -> finishReason = event.reason
+                is HordeChatEvent.Usage -> tokens = maxOf(tokens, event.totalTokens)
+            }
+            val now = System.nanoTime()
+            if (now - lastTelemetryNs > TELEMETRY_INTERVAL_NS) {
+                lastTelemetryNs = now
+                val elapsed = (now - startedNs) / 1e9
+                val tps = if (elapsed > 0.0) tokens / elapsed else 0.0
+                _currentTps.value = tps
+                emit(
+                    GenerationEvent.TelemetryUpdate(
+                        tokensGenerated = tokens,
+                        tokensPerSecond = tps,
+                        memoryAllocatedMb = 0
+                    )
+                )
+            }
+        }
+
+        val held = detector.flush()
+        if (held.isNotEmpty()) {
+            for (chunk in splitter.feed(held)) {
+                if (chunk.thinking) thinking.append(chunk.text) else content.append(chunk.text)
+            }
+        }
+        for (chunk in splitter.flush()) {
+            if (chunk.thinking) thinking.append(chunk.text) else content.append(chunk.text)
+        }
+
+        val durationMs = (System.nanoTime() - startedNs) / 1_000_000
+        return GenerationRound(
+            thinking = thinking.toString(),
+            content = rawContent.toString(),
+            displayThinking = thinking.toString(),
+            displayContent = content.toString(),
+            toolCall = detector.toolCall()?.let { it.toolName to it.argument },
+            tokens = tokens,
+            durationMs = durationMs,
+            cancelled = false,
+            finishReason = finishReason
+        )
+    }
+
+    /**
+     * OpenAI-style messages for a Horde completion. Reasoning is stripped from
+     * replayed assistant turns: the model's own template will otherwise see
+     * the previous think block as part of the answer.
+     */
+    private fun buildHordeMessages(
+        system: String,
+        turns: List<PromptFormat.Turn>
+    ): List<HordeSseParser.HordeMessage> {
+        val messages = mutableListOf(HordeSseParser.HordeMessage("system", system))
+        for (turn in turns) {
+            when (turn.role) {
+                "assistant" -> messages.add(
+                    HordeSseParser.HordeMessage(
+                        "assistant",
+                        HORDE_THINK_BLOCK.replace(turn.content, "")
+                    )
+                )
+                "tool" -> messages.add(
+                    HordeSseParser.HordeMessage(
+                        "user",
+                        "Tool result: ${turn.content.take(MAX_TOOL_RESULT_CHARS)}"
+                    )
+                )
+                else -> messages.add(HordeSseParser.HordeMessage("user", turn.content))
+            }
+        }
+        return messages
+    }
+
+    /**
      * Runs one tool call.
      *
      * A picture or a clip is the one kind of call the executor cannot answer on
@@ -365,6 +680,12 @@ class ModelEngineManager(
         val profile = _currentModel.value
         val file = currentModelFile
         val sessionId = mcpToolExecutor.activeSessionId
+
+        // A Horde chat model has no weights in memory, so there is nothing to
+        // release and nothing to reload between tool rounds.
+        if (profile?.isHorde == true) {
+            return generator(argument, sessionId)
+        }
 
         // Free the chat weights first so the generation model has the memory.
         loadMutex.withLock { releaseEngine() }
@@ -607,7 +928,8 @@ class ModelEngineManager(
         val toolCall: Pair<String, String>?,
         val tokens: Int,
         val durationMs: Long,
-        val cancelled: Boolean
+        val cancelled: Boolean,
+        val finishReason: String? = null
     )
 
     private companion object {
@@ -629,5 +951,10 @@ class ModelEngineManager(
 
         /** Tool result kept in the replayed conversation (chars). */
         const val MAX_TOOL_RESULT_CHARS = 1500
+
+        /** Generation budget of a remote round; the client retries with 512. */
+        const val HORDE_MAX_TOKENS = 2048
+
+        val HORDE_THINK_BLOCK = Regex("<think>[\\s\\S]*?</think>")
     }
 }

@@ -31,7 +31,7 @@ class ModelHubTabTest {
     @Test
     fun `the hub has a tab for every kind of model`() {
         assertEquals(
-            listOf("Text", "Image", "Music", "Video", "TTS", "STT"),
+            listOf("Text", "Image", "AI Horde", "Music", "Video", "TTS", "STT"),
             ModelHubTab.entries.map { it.title }
         )
     }
@@ -39,6 +39,7 @@ class ModelHubTabTest {
     @Test
     fun `the tabs without models yet say so`() {
         assertFalse(ModelHubTab.IMAGE.isWorkInProgress)
+        assertFalse(ModelHubTab.HORDE.isWorkInProgress)
         assertTrue(ModelHubTab.MUSIC.isWorkInProgress)
         assertFalse(ModelHubTab.VIDEO.isWorkInProgress)
         assertFalse(ModelHubTab.TEXT.isWorkInProgress)

@@ -137,6 +137,13 @@ fun ChatScreen(
     val videoState by viewModel.videoState.collectAsStateWithLifecycle()
     val videoError by viewModel.videoError.collectAsStateWithLifecycle()
 
+    // AI Horde. The catalogues are only fetched when its tab is opened.
+    val hordeApiKey by viewModel.hordeApiKey.collectAsStateWithLifecycle()
+    val hordeTextModels by viewModel.hordeTextModels.collectAsStateWithLifecycle()
+    val hordeImageModels by viewModel.hordeImageModels.collectAsStateWithLifecycle()
+    val hordeLoading by viewModel.hordeLoading.collectAsStateWithLifecycle()
+    val hordeError by viewModel.hordeError.collectAsStateWithLifecycle()
+
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val streamingContent by viewModel.streamingContent.collectAsStateWithLifecycle()
     val agentSteps by viewModel.agentSteps.collectAsStateWithLifecycle()
@@ -587,6 +594,13 @@ fun ChatScreen(
         downloadedVideoModels = downloadedVideoModels,
         videoState = videoState,
         videoError = videoError,
+        hordeApiKey = hordeApiKey,
+        hordeTextModels = hordeTextModels,
+        hordeImageModels = hordeImageModels,
+        hordeSelectedTextModel = currentModel.takeIf { it.isHorde },
+        hordeSelectedImageModel = selectedImageModel.takeIf { it.isHorde },
+        hordeLoading = hordeLoading,
+        hordeError = hordeError,
         onToggleStt = { viewModel.setSpeechToTextEnabled(it) },
         onToggleTts = { viewModel.setTextToSpeechEnabled(it) },
         onSelectTtsVoice = { viewModel.selectTtsVoice(it) },
@@ -604,7 +618,12 @@ fun ChatScreen(
         onDeleteImageModel = { viewModel.deleteImageModel(it) },
         onSelectVideoModel = { viewModel.selectVideoModel(it) },
         onDownloadVideoModel = { viewModel.downloadVideoModel(it) },
-        onDeleteVideoModel = { viewModel.deleteVideoModel(it) }
+        onDeleteVideoModel = { viewModel.deleteVideoModel(it) },
+        onHordeTabOpened = { viewModel.onHordeTabOpened() },
+        onSaveHordeApiKey = { viewModel.saveHordeApiKey(it) },
+        onRefreshHordeModels = { viewModel.refreshHordeModels() },
+        onSelectHordeTextModel = { viewModel.selectHordeTextModel(it) },
+        onSelectHordeImageModel = { viewModel.selectHordeImageModel(it) }
     )
 
     // Chat History Drawer Modal

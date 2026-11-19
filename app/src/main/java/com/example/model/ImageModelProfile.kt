@@ -38,8 +38,13 @@ data class ImageModelProfile(
     /** Hugging Face repository slug, used as a fallback download source. */
     val hfRepo: String,
     val hfFile: String,
-    val downloadSizeMb: Int
+    val downloadSizeMb: Int,
+    val backend: ModelBackend = ModelBackend.LOCAL,
+    /** The model name sent to AI Horde; null for weights stored on the device. */
+    val remoteModelId: String? = null
 ) {
+    val isHorde: Boolean get() = backend == ModelBackend.HORDE
+
     /** The file the weights are stored in under [root]. */
     fun fileIn(root: File): File = File(root, "$id.gguf")
 
@@ -50,6 +55,7 @@ data class ImageModelProfile(
      * suspiciously small file is treated as a broken download.
      */
     fun isReady(root: File): Boolean {
+        if (isHorde) return true
         val file = fileIn(root)
         return file.isFile && file.length() >= MIN_SIZE_BYTES
     }

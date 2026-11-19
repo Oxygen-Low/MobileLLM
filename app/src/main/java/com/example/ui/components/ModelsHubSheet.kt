@@ -42,6 +42,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -107,6 +108,13 @@ fun ModelsHubSheet(
     downloadedVideoModels: Set<String> = emptySet(),
     videoState: VideoEngineState = VideoEngineState.UNLOADED,
     videoError: String? = null,
+    hordeApiKey: String = "",
+    hordeTextModels: List<ModelProfile> = emptyList(),
+    hordeImageModels: List<ImageModelProfile> = emptyList(),
+    hordeSelectedTextModel: ModelProfile? = null,
+    hordeSelectedImageModel: ImageModelProfile? = null,
+    hordeLoading: Boolean = false,
+    hordeError: String? = null,
     onToggleStt: (Boolean) -> Unit,
     onToggleTts: (Boolean) -> Unit,
     onSelectTtsVoice: (SpeechModelProfile) -> Unit,
@@ -125,6 +133,11 @@ fun ModelsHubSheet(
     onSelectVideoModel: (VideoModelProfile) -> Unit = {},
     onDownloadVideoModel: (VideoModelProfile) -> Unit = {},
     onDeleteVideoModel: (VideoModelProfile) -> Unit = {},
+    onHordeTabOpened: () -> Unit = {},
+    onSaveHordeApiKey: (String) -> Unit = {},
+    onRefreshHordeModels: () -> Unit = {},
+    onSelectHordeTextModel: (ModelProfile) -> Unit = {},
+    onSelectHordeImageModel: (ImageModelProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (!isOpen) return
@@ -455,6 +468,28 @@ fun ModelsHubSheet(
                                     )
                                 }
                             }
+                        }
+                    }
+
+                    ModelHubTab.HORDE -> {
+                        item(key = "horde") {
+                            // The catalogues are fetched the first time the tab
+                            // opens, not on every app start: they change from
+                            // minute to minute and need a network round trip.
+                            LaunchedEffect(Unit) { onHordeTabOpened() }
+                            HordeTab(
+                                apiKey = hordeApiKey,
+                                textModels = hordeTextModels,
+                                imageModels = hordeImageModels,
+                                selectedTextModel = hordeSelectedTextModel,
+                                selectedImageModel = hordeSelectedImageModel,
+                                loading = hordeLoading,
+                                error = hordeError,
+                                onSaveApiKey = onSaveHordeApiKey,
+                                onRefresh = onRefreshHordeModels,
+                                onSelectTextModel = onSelectHordeTextModel,
+                                onSelectImageModel = onSelectHordeImageModel
+                            )
                         }
                     }
 

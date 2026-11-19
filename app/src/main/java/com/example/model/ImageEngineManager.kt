@@ -3,6 +3,9 @@ package com.example.model
 import android.content.Context
 import android.util.Log
 import com.example.data.ImagePreferences
+import com.example.horde.HordeCatalog
+import com.example.horde.HordeClient
+import com.example.horde.HordeImageConverter
 import com.example.image.GeneratedImage
 import com.example.image.GeneratedImageStore
 import com.example.image.ImageGenerationRequest
@@ -53,7 +56,8 @@ enum class ImageEngineState {
 class ImageEngineManager(
     context: Context,
     private val downloads: ModelDownloadManager,
-    private val store: GeneratedImageStore
+    private val store: GeneratedImageStore,
+    private val hordeClient: HordeClient? = null
 ) {
     private val preferences = ImagePreferences(context.applicationContext)
 
@@ -106,6 +110,7 @@ class ImageEngineManager(
 
     /** Downloads the weights of [model] without generating anything yet. */
     suspend fun downloadModel(model: ImageModelProfile) {
+        if (model.isHorde) return
         downloadWeights(model)
     }
 
@@ -117,6 +122,7 @@ class ImageEngineManager(
      * missing file.
      */
     suspend fun deleteModel(model: ImageModelProfile) {
+        if (model.isHorde) return
         if (_selected.value.id == model.id) {
             unloadInternal()
         }
@@ -161,6 +167,7 @@ class ImageEngineManager(
      */
     suspend fun ensureReady(): Boolean {
         val model = _selected.value
+        if (model.isHorde) return true
         if (!model.isReady(downloads.modelsDir)) {
             downloadWeights(model)
         }
@@ -186,6 +193,7 @@ class ImageEngineManager(
             _error.value = "The image description was empty"
             return null
         }
+        if (_selected.value.isHorde) return generateOnHorde(request, sessionId)
         if (!ensureReady()) return null
 
         val active = handle
@@ -221,6 +229,49 @@ class ImageEngineManager(
         } catch (t: Throwable) {
             Log.e(TAG, "Image generation failed", t)
             _error.value = t.message ?: "Image generation failed"
+            null
+        } finally {
+            _isGenerating.value = false
+        }
+    }
+
+    /**
+     * Draws the picture on AI Horde.
+     *
+     * No weights are loaded here: the selected remote profile only carries the
+     * model name. Horde answers with a base64 WebP or PNG, which is converted
+     * to PNG before it goes into the per-session store.
+     */
+    private suspend fun generateOnHorde(
+        request: ImageGenerationRequest,
+        sessionId: String
+    ): GeneratedImage? {
+        val client = hordeClient
+        val model = _selected.value
+        if (client == null) {
+            _error.value = "AI Horde is not configured"
+            return null
+        }
+        val modelName = model.remoteModelId ?: model.name
+        val width = HordeImageConverter.alignSize(request.width)
+        val height = HordeImageConverter.alignSize(request.height)
+        _isGenerating.value = true
+        return try {
+            val bytes = client.generateImage(
+                model = modelName,
+                prompt = request.prompt,
+                width = width,
+                height = height,
+                steps = request.steps,
+                seed = request.seed
+            )
+            val png = HordeImageConverter.toPng(bytes)
+            store.save(sessionId, png, request.prompt, width, height)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            Log.e(TAG, "Horde image generation failed", t)
+            _error.value = t.message ?: "AI Horde could not draw the picture"
             null
         } finally {
             _isGenerating.value = false
@@ -330,7 +381,9 @@ class ImageEngineManager(
     }
 
     private fun stateFromDisk(model: ImageModelProfile): ImageEngineState =
-        if (model.isReady(downloads.modelsDir)) {
+        if (model.isHorde) {
+            ImageEngineState.READY
+        } else if (model.isReady(downloads.modelsDir)) {
             ImageEngineState.UNLOADED
         } else {
             ImageEngineState.NOT_DOWNLOADED
@@ -338,8 +391,12 @@ class ImageEngineManager(
 
     /** The model with the given id, or the default when the id is unknown. */
     private fun modelFromId(id: String): ImageModelProfile =
-        ImageModelProfile.MODELS.firstOrNull { it.id == id }
-            ?: ImageModelProfile.DEFAULT_IMAGE_MODEL
+        if (HordeCatalog.isHordeId(id)) {
+            HordeCatalog.rememberedImageProfile(id)
+        } else {
+            ImageModelProfile.MODELS.firstOrNull { it.id == id }
+                ?: ImageModelProfile.DEFAULT_IMAGE_MODEL
+        }
 
     private companion object {
         const val TAG = "ImageEngineManager"

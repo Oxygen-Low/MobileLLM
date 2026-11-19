@@ -7,6 +7,21 @@ enum class ModelDownloadState {
     ERROR
 }
 
+/**
+ * Where a model's weights live.
+ *
+ * A [HORDE] profile is only a handle to a model running on AI Horde: there is
+ * no GGUF file and no native engine, but the profile takes part in the same
+ * selection and streaming flows as an on-device model.
+ */
+enum class ModelBackend {
+    LOCAL,
+    HORDE
+}
+
+/** Prefix of the ids of AI Horde models, both chat and image. */
+const val HORDE_ID_PREFIX = "horde:"
+
 /** Chat template family used to render prompts for a model. */
 enum class PromptStyle {
     SMOLLM3,
@@ -36,10 +51,15 @@ data class ModelProfile(
     val hfFile: String? = null,
     val downloadSizeMb: Int = 0,
     val downloadState: ModelDownloadState = ModelDownloadState.NOT_DOWNLOADED,
-    val downloadProgress: Float = 0f
+    val downloadProgress: Float = 0f,
+    val backend: ModelBackend = ModelBackend.LOCAL,
+    /** The model name sent to AI Horde; null for weights stored on the device. */
+    val remoteModelId: String? = null
 ) {
+    val isHorde: Boolean get() = backend == ModelBackend.HORDE
+
     val isReadyToLoad: Boolean
-        get() = downloadState == ModelDownloadState.DOWNLOADED
+        get() = isHorde || downloadState == ModelDownloadState.DOWNLOADED
 
     companion object {
         /**

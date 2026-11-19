@@ -14,6 +14,9 @@ import com.example.data.ChatSessionEntity
 import com.example.data.ChatTranscript
 import com.example.data.LegacyInstallPreferences
 import com.example.data.ModelPreferences
+import com.example.horde.HordeCatalog
+import com.example.horde.HordeClient
+import com.example.horde.HordePreferences
 import com.example.image.GeneratedImage
 import com.example.image.GeneratedImageStore
 import com.example.image.ImagePromptParser
@@ -70,7 +73,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ChatRepository(database.chatDao())
     val htmlSandboxManager = HtmlSandboxManager(File(application.filesDir, "sandboxes"))
     val mcpToolExecutor = MCPToolExecutor(htmlSandboxManager = htmlSandboxManager)
-    val modelEngineManager = ModelEngineManager(mcpToolExecutor)
+    private val hordePreferences = HordePreferences(application)
+    val hordeClient = HordeClient(hordePreferences)
+    val modelEngineManager = ModelEngineManager(mcpToolExecutor, hordeClient)
     val downloadManager = ModelDownloadManager(application)
     val updateManager = UpdateManager(application)
     private val legacyInstallManager = LegacyInstallManager(application)
@@ -101,7 +106,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * The image model. It is loaded only while a picture is drawn: the chat
      * model is released first, so the two never share the memory.
      */
-    val imageEngineManager = ImageEngineManager(application, downloadManager, generatedImageStore)
+    val imageEngineManager = ImageEngineManager(application, downloadManager, generatedImageStore, hordeClient)
 
     /** The image models the user can pick from. */
     val imageModels: List<ImageModelProfile> = ImageModelProfile.MODELS
@@ -110,6 +115,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val downloadedImageModels: StateFlow<Set<String>> = imageEngineManager.downloaded
     val imageState: StateFlow<ImageEngineState> = imageEngineManager.state
     val imageError: StateFlow<String?> = imageEngineManager.error
+
+    // ---------------------------------------------------------------------
+    // AI Horde
+    // ---------------------------------------------------------------------
+
+    /** The key sent to Horde; the anonymous one until the user enters their own. */
+    val hordeApiKey: StateFlow<String> = hordePreferences.apiKey
+
+    /** Models advertised by the Horde catalogues, fetched when the tab opens. */
+    val hordeTextModels = MutableStateFlow<List<ModelProfile>>(emptyList())
+    val hordeImageModels = MutableStateFlow<List<ImageModelProfile>>(emptyList())
+    val hordeLoading = MutableStateFlow(false)
+    val hordeError = MutableStateFlow<String?>(null)
+
+    private var hordeFetchJob: Job? = null
 
     /**
      * The clips the chats generated. They share the per-session folders with
@@ -194,8 +214,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * downloaded model when the remembered one is gone.
      */
     val selectedModel = MutableStateFlow(
-        ModelProfile.DEFAULT_MODELS.firstOrNull { it.id == modelPreferences.selectedModelId }
-            ?: ModelProfile.QWEN3_0_6B
+        if (HordeCatalog.isHordeId(modelPreferences.selectedModelId)) {
+            HordeCatalog.rememberedTextProfile(modelPreferences.selectedModelId)
+        } else {
+            ModelProfile.DEFAULT_MODELS.firstOrNull { it.id == modelPreferences.selectedModelId }
+                ?: ModelProfile.QWEN3_0_6B
+        }
     )
 
     val downloadStates: StateFlow<Map<String, DownloadProgressInfo>> = downloadManager.downloadStates
@@ -345,7 +369,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // device. If it was deleted, another downloaded model takes over so
         // the app still starts with something usable.
         val remembered = updated.firstOrNull { it.id == selectedModel.value.id }
-        val current = remembered?.takeIf { it.isReadyToLoad }
+        // A Horde model has no file to check; keep it as the selection instead
+        // of silently falling back to a local model on every launch.
+        val current = selectedModel.value.takeIf { it.isHorde }
+            ?: remembered?.takeIf { it.isReadyToLoad }
             ?: updated.firstOrNull { it.isReadyToLoad }
             ?: remembered
             ?: updated.first()
@@ -490,7 +517,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // back, so remember it before the weights are touched.
         modelPreferences.selectedModelId = model.id
         viewModelScope.launch {
-            val file = downloadManager.getModelFile(model.id)
+            val file = if (model.isHorde) null else downloadManager.getModelFile(model.id)
             modelEngineManager.loadModel(model, file)
         }
     }
@@ -556,8 +583,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         removePreviousInstall()
         viewModelScope.launch {
             if (selectedModel.value.isReadyToLoad && modelEngineManager.loadState.value != ModelLoadState.LOADED) {
-                val file = downloadManager.getModelFile(selectedModel.value.id)
-                modelEngineManager.loadModel(selectedModel.value, file)
+                val model = selectedModel.value
+                val file = if (model.isHorde) null else downloadManager.getModelFile(model.id)
+                modelEngineManager.loadModel(model, file)
             }
         }
         // Autoload the speech engines the user left enabled.
@@ -812,6 +840,71 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissImageError() {
         imageEngineManager.clearError()
+    }
+
+    /** Fetches the Horde catalogues the first time the Horde tab is opened. */
+    fun onHordeTabOpened() {
+        if (hordeTextModels.value.isEmpty() && hordeImageModels.value.isEmpty()) {
+            refreshHordeModels()
+        }
+    }
+
+    /** Refreshes both catalogues, for example after saving a new API key. */
+    fun refreshHordeModels() {
+        hordeFetchJob?.cancel()
+        hordeFetchJob = viewModelScope.launch {
+            hordeLoading.value = true
+            hordeError.value = null
+            try {
+                val text = hordeClient.fetchTextModels()
+                hordeTextModels.value = text
+                hordeImageModels.value = hordeClient.fetchImageModels()
+
+                // The remembered selection is only a name; once the catalogue
+                // is here, replace it with the full profile so the tab shows it
+                // as selected and requests use the exact model name.
+                val currentText = selectedModel.value
+                if (currentText.isHorde) {
+                    text.firstOrNull { it.id == currentText.id }?.let { full ->
+                        selectedModel.value = full
+                        modelEngineManager.loadModel(full)
+                    }
+                }
+                val currentImage = imageEngineManager.selected.value
+                if (currentImage.isHorde) {
+                    hordeImageModels.value.firstOrNull { it.id == currentImage.id }?.let { full ->
+                        imageEngineManager.selectModel(full)
+                    }
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                hordeError.value = e.message ?: "Could not reach AI Horde"
+            } finally {
+                hordeLoading.value = false
+            }
+        }
+    }
+
+    /** Saves the key and reloads the catalogues with its allowance. */
+    fun saveHordeApiKey(key: String) {
+        hordePreferences.saveApiKey(key)
+        refreshHordeModels()
+    }
+
+    /** Picks a remote chat model; there is nothing to download or load. */
+    fun selectHordeTextModel(model: ModelProfile) {
+        inactivityJob?.cancel()
+        inactivityJob = null
+        selectedModel.value = model
+        modelPreferences.selectedModelId = model.id
+        viewModelScope.launch { modelEngineManager.loadModel(model) }
+    }
+
+    /** Picks a remote image model without downloading any weights. */
+    fun selectHordeImageModel(model: ImageModelProfile) {
+        imageEngineManager.clearError()
+        viewModelScope.launch { imageEngineManager.selectModel(model) }
     }
 
     /** The file of a generated picture of the current chat, or null. */
@@ -1175,7 +1268,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // If downloaded but unloaded, ensure it is loaded
         if (modelEngineManager.loadState.value != ModelLoadState.LOADED) {
             viewModelScope.launch {
-                val file = downloadManager.getModelFile(model.id)
+                val file = if (model.isHorde) null else downloadManager.getModelFile(model.id)
                 modelEngineManager.loadModel(model, file)
                 executePromptStream(promptText, model)
             }
@@ -1497,7 +1590,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             if (modelEngineManager.loadState.value != ModelLoadState.LOADED) {
-                val file = downloadManager.getModelFile(model.id)
+                val file = if (model.isHorde) null else downloadManager.getModelFile(model.id)
                 modelEngineManager.loadModel(model, file)
             }
             executePromptStream(transcript[target.promptIndex].content, model)

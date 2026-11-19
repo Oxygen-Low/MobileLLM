@@ -14,6 +14,9 @@ enum class ModelHubTab(val title: String) {
     /** Image generation models. */
     IMAGE("Image"),
 
+    /** Text and image models that run on AI Horde instead of the device. */
+    HORDE("AI Horde"),
+
     /** Music generation models. */
     MUSIC("Music"),
 
