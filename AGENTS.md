@@ -45,10 +45,11 @@ Do this even when:
 ### Which version is the right one
 
 The version of the app is the git tag `V<n>`, where `n` is the
-`versionCode` of the build. Releases are cut from `main` and the workflow
-picks the next number from the tags that are already published, so the version
-that is currently under development is always the latest **released** tag plus
-one.
+`versionCode` of the build. Releases are cut from `main`: every push starts the
+workflow in `.github/workflows/build-and-release.yml`, which picks the next
+number from the tags that already exist and publishes the release at the end of
+the run. The version under development is therefore the highest number that no
+other build is about to take.
 
 **Ask the remote, not the working copy.** A local clone can be behind, and the
 files in `changelogs/` are not a record of what was released: a file can exist
@@ -57,7 +58,7 @@ all. Always read the latest release from GitHub before you pick a number, and
 never take it from the highest file name in `changelogs/`.
 
 ```bash
-# The latest release that actually exists on GitHub (prints e.g. 21).
+# The latest release that actually exists on GitHub (prints e.g. 31).
 git ls-remote --tags --refs origin \
   | sed -E 's#.*refs/tags/V([0-9]+)$#\1#' \
   | grep -E '^[0-9]+$' | sort -n | tail -n 1
@@ -69,23 +70,68 @@ release together with its notes. On Windows, plain
 the same answer. Local tags, `git describe --tags` and `changelogs/*.md` are
 only hints; the remote is the answer.
 
-With `V21` as the latest release, the version under development is `V22`, so
-the entry goes into `changelogs/V22.md`.
+**Ask the workflow too, not only the tags.** The tag is created at the very end
+of the run, in the `Publish GitHub release` step, so a build that is still
+running has not created its tag yet and the tag list makes that number look
+free. The same holds for a build queued behind the one that is running. If you
+write your entry under a number one of those builds will take, your notes end
+up on a release that does not contain your change, and the release that does
+contain it says that there are no changelogs. That is the trap when several
+agents work at once, or when you work while a version is being built.
+
+Every build that is queued or in progress owns one number, and it owns it
+before yours: the workflow is serialized (see `concurrency` in the file), and
+your own push starts a build of its own.
+
+```bash
+# The runs that are still going to publish a tag.
+gh run list --workflow build-and-release.yml --limit 20 \
+  --json status,conclusion,event,createdAt,url
+```
+
+Read the list like this:
+
+- `status: in_progress` and `status: queued` are builds that will publish the
+  next tags. `status: completed` does not count: a successful run has its tag
+  in the tag list already, and a failed or cancelled run never created one.
+- The runs finish in the order they were created and your build comes after
+  every one already waiting, so add one number for each run still ahead of you.
+- `workflow_dispatch` runs publish a tag just like a `push` run does, so they
+  count the same way.
+- At most one run is in progress and one is queued at a time, so no unfinished
+  runs means nothing is in flight.
+
+With `V31` as the latest release and one build in progress, that build becomes
+`V32` and the entry goes into `changelogs/V33.md`. If `gh` is not installed,
+`curl -s "https://api.github.com/repos/<owner>/<repo>/actions/runs?per_page=20"`
+returns the same runs (`<owner>/<repo>` from `git remote get-url origin`), and
+the Actions tab of the repository shows them as well.
+
+The workflow is short. Read the `Determine next version` and
+`Publish GitHub release` steps when you are unsure what a build will do.
 
 Rules:
 
-1. Check the latest release on the remote when you start and again before you
-   finish: another release may have been published in between. Re-check it
-   instead of reusing a number you captured earlier in the session.
+1. Check the published tags **and** the unfinished runs of the release
+   workflow when you start and again before you finish: another agent may have
+   pushed, or a build may have taken the number, in between. Re-check instead
+   of reusing a number you captured earlier in the session.
 2. Add your entry to `changelogs/V<next version>.md`. Create that file with
    the heading `# V<next version>` when it does not exist yet.
-3. Never move your entry to another version file. If a `V<n>` tag exists on the
-   remote, that version is already released and its notes are shown to everyone
-   who updated to it. Fixing a released version means describing the fix in the
-   *new* version file.
+3. Never move your entry into the file of a version that will ship without
+   your change. Once your change is pushed its number is fixed: the tag is
+   created for that build's number and a file under another number ships as
+   "no changelogs". Before the push, renaming your own file to the right
+   number is just fixing your work. Never write into the file of a version
+   whose build has already started: that build read its changelog from its own
+   commit, and the notes of a released version are already shown to everyone
+   who updated to it.
 4. If your work is big enough to deserve its own release, say so in your
    summary. The number is still picked by the release workflow from the
    published tags, so the file name always follows the releases.
+5. Say which number you used and which builds you counted in your summary. If
+   a build you counted was cancelled, the next agent needs to see the
+   reasoning to correct the number before the push.
 
 ### How a changelog file looks
 
