@@ -1,7 +1,7 @@
 # Notice
 MobileLLM is moving to [Oxygen Low's Software](oxygenlow.com)
-You'll still be able to do almost everything you can do on MobileLLM, but you'll also gain access to more apps, MCPs, built in characters + universes without API keys, etc.
-You can still use MobileLLM if you wish, though there will be no more updates. Moving will also bring Desktop support.
+You'll still be able to do almost everything you can do on MobileLLM, but you'll also gain access to more apps, MCPs, built in characters + universes without API keys, desktop support, using models running on other devices, etc.
+You can still use MobileLLM if you wish, though there will be no more updates.
 
 # MobileLLM
 A LLM app designed for mobile use. Instead of models running via api providers, the models run completely on your device, including TTS and STT.
